@@ -32,11 +32,11 @@ const (
 	progressWidth   = 50
 	defaultDuration = 3 * time.Minute // fallback cuando no hay metadata
 
-	// NUEVO: Tasa de muestreo estándar para evitar aceleración (Chipmunk effect)
+	// Tasa de muestreo estándar para evitar aceleración (Chipmunk effect)
 	standardSampleRate = beep.SampleRate(44100)
 )
 
-// Paleta de colores: tema Dracula optimizado para legibilidad en terminal[cite: 1]
+// Paleta de colores: tema Dracula optimizado para legibilidad en terminal
 var (
 	pink       = lipgloss.Color("#FF79C6")
 	cyan       = lipgloss.Color("#8BE9FD")
@@ -49,10 +49,36 @@ var (
 	comment    = lipgloss.Color("#6272A4")
 	selection  = lipgloss.Color("#44475A")
 	background = lipgloss.Color("#282A36")
+
+	// Estilos para el panel de ayuda moderno
+	helpContainerStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(selection).
+				Padding(1, 2).
+				MarginLeft(2).
+				MarginTop(1)
+
+	helpCategoryStyle = lipgloss.NewStyle().
+				Foreground(purple).
+				Bold(true).
+				MarginBottom(1)
+
+	helpKeyStyle = lipgloss.NewStyle().
+			Background(selection).
+			Foreground(cyan).
+			Bold(true).
+			Align(lipgloss.Center).
+			Width(10).
+			MarginRight(1).
+			MarginBottom(1)
+
+	helpDescStyle = lipgloss.NewStyle().
+			Foreground(comment).
+			MarginBottom(1)
 )
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// DOMINIO: MODELOS DE DATOS[cite: 1]
+// DOMINIO: MODELOS DE DATOS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 type PlaybackState int
@@ -139,7 +165,7 @@ func (t Track) FormattedDuration() string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// DOMINIO: GESTIÓN DE LA LISTA DE REPRODUCCIÓN[cite: 1]
+// DOMINIO: GESTIÓN DE LA LISTA DE REPRODUCCIÓN
 // ═══════════════════════════════════════════════════════════════════════════════
 
 type Playlist struct {
@@ -257,17 +283,14 @@ func NewAudioEngine() *AudioEngine {
 	return &AudioEngine{}
 }
 
-// Load decodifica un archivo de audio, calcula la duración real y remuestrea.
-// CORRECCIÓN: Ahora devuelve la duración calculada matemáticamente.
 func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
-	ae.Stop() // Limpieza preventiva[cite: 1]
+	ae.Stop()
 
 	file, err := os.Open(track.Path)
 	if err != nil {
 		return 0, fmt.Errorf("abrir archivo: %w", err)
 	}
 
-	// Intentar MP3 primero, fallback a WAV[cite: 1]
 	streamer, format, err := mp3.Decode(file)
 	if err != nil {
 		file.Close()
@@ -282,10 +305,10 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 		}
 	}
 
-	// CORRECCIÓN: Calcular duración exacta usando el número de frames y la tasa original.
+	// Calcular duración exacta
 	realDuration := format.SampleRate.D(streamer.Len())
 
-	// CORRECCIÓN: Inicializar speaker una sola vez con la tasa de muestreo ESTÁNDAR.
+	// Inicializar speaker una sola vez con la tasa de muestreo ESTÁNDAR
 	if !ae.isInit {
 		speaker.Init(standardSampleRate, standardSampleRate.N(time.Second/10))
 		ae.isInit = true
@@ -294,7 +317,7 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	ae.streamer = streamer
 	ae.format = format
 
-	// CORRECCIÓN: Remuestrear el audio original a nuestra tasa estándar para evitar cambios de velocidad.
+	// Remuestrear el audio original a nuestra tasa estándar
 	resampled := beep.Resample(4, format.SampleRate, standardSampleRate, streamer)
 
 	ae.ctrl = &beep.Ctrl{Streamer: resampled}
@@ -347,7 +370,7 @@ func (ae *AudioEngine) IsMuted() bool {
 	return ae.volume != nil && ae.volume.Silent
 }
 
-// CORRECCIÓN: Obtener la posición real del stream de audio para la barra de progreso.
+// Obtener la posición real del stream de audio
 func (ae *AudioEngine) Position() time.Duration {
 	if ae.streamer != nil {
 		return ae.format.SampleRate.D(ae.streamer.Position())
@@ -365,7 +388,6 @@ func (ae *AudioEngine) Seek(position time.Duration) error {
 		return fmt.Errorf("formato no permite seek")
 	}
 
-	// Usamos la tasa original del archivo para el seek, no la estándar
 	sampleRate := int(ae.format.SampleRate)
 	samples := int(position.Seconds()) * sampleRate
 
@@ -389,26 +411,22 @@ func (ae *AudioEngine) Close() {
 type (
 	trackLoadedMsg struct {
 		track    Track
-		duration time.Duration // CORRECCIÓN: Incluir la duración real
+		duration time.Duration
 	}
-
 	playbackEndedMsg struct {
 		sessionID int
 	}
-
-	tickMsg time.Time
-
+	tickMsg           time.Time
 	libraryScannedMsg struct {
 		tracks []Track
 	}
-
 	errorMsg struct {
 		err error
 	}
 )
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// APLICACIÓN: MODELO DE LA UI (Bubble Tea)[cite: 1]
+// APLICACIÓN: MODELO DE LA UI (Bubble Tea)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 type AppModel struct {
@@ -457,7 +475,7 @@ func (m AppModel) Init() tea.Cmd {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func (m AppModel) tick() tea.Cmd {
-	// CORRECCIÓN: Ticks más rápidos para una barra suave, ya que ahora consultamos al motor de audio.
+	// Ticks más rápidos para una barra fluida
 	return tea.Tick(time.Millisecond*250, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
@@ -507,30 +525,26 @@ func (m AppModel) scanLibrary() tea.Cmd {
 					Title:  name,
 					Artist: "Desconocido",
 					Path:   path,
-					// Nota: La duración real ahora se obtiene al hacer Load() en el motor de audio.
 				})
 			}
 		}
-
 		return libraryScannedMsg{tracks: found}
 	}
 }
 
 func (m AppModel) loadTrackCmd(track Track) tea.Cmd {
 	return func() tea.Msg {
-		// CORRECCIÓN: Extraer la duración real desde Load()
 		duration, err := m.audio.Load(track)
 		if err != nil {
 			return errorMsg{err}
 		}
-		// Actualizar el track temporalmente para mostrarlo en la UI antes del Update
 		track.Duration = duration
 		return trackLoadedMsg{track: track, duration: duration}
 	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// APLICACIÓN: ACTUALIZACIÓN DE ESTADO (Update)[cite: 1]
+// APLICACIÓN: ACTUALIZACIÓN DE ESTADO (Update)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -628,16 +642,13 @@ func (m AppModel) handleTrackLoaded(msg trackLoadedMsg) (tea.Model, tea.Cmd) {
 
 	done := m.audio.Play()
 
-	// CORRECCIÓN: Asignar la duración 100% real de la pista
 	m.state = StatePlaying
 	m.totalTime = msg.duration
 	if m.totalTime <= 0 {
 		m.totalTime = defaultDuration
 	}
 
-	// Actualizamos la duración en el playlist para que se vea en la cola
 	m.playlist.tracks[m.playlist.current].Duration = msg.duration
-
 	m.elapsed = 0
 
 	waitCmd := func() tea.Msg {
@@ -654,7 +665,6 @@ func (m AppModel) handleTrackLoaded(msg trackLoadedMsg) (tea.Model, tea.Cmd) {
 
 func (m AppModel) handleTick() (tea.Model, tea.Cmd) {
 	if m.state == StatePlaying {
-		// CORRECCIÓN: El elapsed se basa en la posición del audio, no en la suma de ticks.
 		m.elapsed = m.audio.Position()
 
 		if m.elapsed > m.totalTime {
@@ -689,7 +699,7 @@ func (m AppModel) handleError(msg errorMsg) (tea.Model, tea.Cmd) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// APLICACIÓN: ACCIONES DEL REPRODUCTOR[cite: 1]
+// APLICACIÓN: ACCIONES DEL REPRODUCTOR
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func (m AppModel) togglePlayback() (tea.Model, tea.Cmd) {
@@ -818,7 +828,7 @@ func (m *AppModel) shutdown() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// APLICACIÓN: VISTA (View) — RENDERIZADO POR COMPONENTES[cite: 1]
+// APLICACIÓN: VISTA (View) — RENDERIZADO POR COMPONENTES
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func (m AppModel) View() string {
@@ -923,249 +933,260 @@ func (m AppModel) renderProgressBar() string {
 
 	return lipgloss.NewStyle().
 		MarginLeft(2).
-		Render(bar) +
-		lipgloss.NewStyle().
-			Foreground(comment).
-			Render(timeInfo)
+		Render(bar) + lipgloss.NewStyle().Foreground(cyan).Render(timeInfo)
 }
 
 func (m AppModel) renderMetadataLine() string {
-	shuffleIcon := ""
-	if m.playlist.shuffle {
-		shuffleIcon = " 🔀"
-	}
-
-	muteIcon := ""
+	volDisplay := ""
 	if m.audio.IsMuted() {
-		muteIcon = " 🔇"
+		volDisplay = lipgloss.NewStyle().Foreground(red).Render("Vol: Mut")
+	} else {
+		pct := int((m.volumeLevel - minVolume) / (maxVolume - minVolume) * 100)
+		volDisplay = fmt.Sprintf("Vol: %d%%", pct)
 	}
 
-	volPercent := int((1.0 + m.volumeLevel/10) * 100)
-	volBar := renderVolumeBar(m.volumeLevel, maxVolume, minVolume)
+	queueDisplay := fmt.Sprintf("%d/%d", m.playlist.current+1, m.playlist.Length())
+	if m.playlist.Length() == 0 {
+		queueDisplay = "0/0"
+	}
 
-	info := fmt.Sprintf("%s  %s%s  Vol: %s %d%%%s",
-		m.playlist.repeat.Icon(),
-		m.playlist.repeat.Label(),
-		shuffleIcon,
-		volBar,
-		volPercent,
-		muteIcon,
+	metaStyle := lipgloss.NewStyle().Foreground(comment).MarginLeft(2)
+
+	shuffleIcon := " "
+	if m.playlist.shuffle {
+		shuffleIcon = " 🔀 "
+	}
+
+	repeatIcon := " " + m.playlist.repeat.Icon() + " "
+
+	return metaStyle.Render(
+		fmt.Sprintf("🔊 %s  |  📋 %s  |%s|%s",
+			volDisplay,
+			queueDisplay,
+			shuffleIcon,
+			repeatIcon,
+		),
 	)
-
-	return lipgloss.NewStyle().
-		Foreground(comment).
-		MarginLeft(2).
-		Render(info)
 }
 
 func (m AppModel) renderPlaylistPanel() string {
 	if m.playlist.IsEmpty() {
-		return lipgloss.NewStyle().
-			Foreground(comment).
-			MarginLeft(2).
-			Render("📂 Cola vacía — Escaneando directorios...")
+		return ""
 	}
 
-	var lines []string
+	var builder strings.Builder
+	builder.WriteString(lipgloss.NewStyle().Bold(true).Foreground(orange).Render("  Próximamente:\n"))
 
-	header := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(purple).
-		MarginLeft(2).
-		Render(fmt.Sprintf("📋 Cola (%d canciones)", m.playlist.Length()))
-	lines = append(lines, header)
-
-	visibleStart, visibleEnd := m.calculateVisibleRange(10)
-
-	for i := visibleStart; i < visibleEnd; i++ {
-		lines = append(lines, m.renderTrackRow(i))
-	}
-
-	if m.playlist.Length() > 10 {
-		scrollHint := fmt.Sprintf("... %d más ...", m.playlist.Length()-10)
-		lines = append(lines, lipgloss.NewStyle().Foreground(comment).MarginLeft(4).Render(scrollHint))
-	}
-
-	return lipgloss.JoinVertical(lipgloss.Left, lines...)
-}
-
-func (m AppModel) renderTrackRow(index int) string {
-	track := m.playlist.tracks[index]
-
-	prefix := "  "
-	if index == m.playlist.current {
-		prefix = "▶ "
-	}
-
-	number := fmt.Sprintf("%2d.", index+1)
-	name := truncate(track.DisplayName(), 36)
-	duration := track.FormattedDuration()
-
-	row := fmt.Sprintf("%s%s %-38s %8s", prefix, number, name, duration)
-
-	switch {
-	case index == m.cursorIndex:
-		return lipgloss.NewStyle().
-			Background(selection).
-			Foreground(green).
-			Bold(true).
-			MarginLeft(2).
-			Render("▸ " + row)
-
-	case index == m.playlist.current:
-		return lipgloss.NewStyle().
-			Foreground(cyan).
-			MarginLeft(2).
-			Render(row)
-
-	default:
-		return lipgloss.NewStyle().
-			Foreground(foreground).
-			MarginLeft(2).
-			Render(row)
-	}
-}
-
-func (m AppModel) calculateVisibleRange(maxVisible int) (int, int) {
-	total := m.playlist.Length()
-	if total <= maxVisible {
-		return 0, total
-	}
-
-	start := m.cursorIndex - maxVisible/2
+	start := m.cursorIndex - 3
 	if start < 0 {
 		start = 0
 	}
-	end := start + maxVisible
-	if end > total {
-		end = total
-		start = total - maxVisible
+	end := start + 7
+	if end > m.playlist.Length() {
+		end = m.playlist.Length()
 	}
-	return start, end
+
+	if start > 0 {
+		builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("    ↑ ...\n"))
+	}
+
+	for i := start; i < end; i++ {
+		t := m.playlist.tracks[i]
+
+		cursor := "  "
+		if i == m.cursorIndex {
+			cursor = "▶ "
+		}
+
+		style := lipgloss.NewStyle()
+		if i == m.playlist.current {
+			style = style.Bold(true).Foreground(pink)
+		} else if i == m.cursorIndex {
+			style = style.Foreground(cyan)
+		} else {
+			style = style.Foreground(foreground)
+		}
+
+		row := fmt.Sprintf("%s%d. %-35s [%s]",
+			cursor,
+			i+1,
+			truncate(t.DisplayName(), 35),
+			t.FormattedDuration(),
+		)
+		builder.WriteString("  " + style.Render(row) + "\n")
+	}
+
+	if end < m.playlist.Length() {
+		builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("    ↓ ...\n"))
+	}
+
+	return builder.String()
 }
 
+// NUEVO: renderHelpPanel () — Versión en Grid / Rejilla Responsiva
 func (m AppModel) renderHelpPanel() string {
-	bindings := []struct {
+	type binding struct {
 		key  string
 		desc string
-	}{
-		{"space", "Reproducir / Pausar"},
-		{"n / N", "Siguiente / Anterior"},
-		{"↑↓ / jk", "Navegar lista"},
-		{"enter", "Reproducir seleccionada"},
-		{"d", "Eliminar de la cola"},
-		{"+ / -", "Volumen"},
-		{"m", "Silenciar"},
-		{"> / <", "Adelantar / Retroceder 10s"},
-		{"0", "Reiniciar canción"},
-		{"r", "Modo repetición"},
-		{"s", "Aleatorio"},
-		{"l", "Mostrar/ocultar cola"},
-		{"h / ?", "Ayuda"},
-		{"q", "Salir"},
 	}
 
-	var lines []string
-	lines = append(lines, lipgloss.NewStyle().
-		Foreground(purple).
-		Bold(true).
-		MarginLeft(2).
-		Render("⌨️  Controles"))
-
-	for _, b := range bindings {
-		key := lipgloss.NewStyle().
-			Foreground(cyan).
-			Bold(true).
-			Width(12).
-			Render(b.key)
-		desc := lipgloss.NewStyle().
-			Foreground(comment).
-			Render(b.desc)
-		lines = append(lines, lipgloss.NewStyle().MarginLeft(4).Render(key+" "+desc))
+	type category struct {
+		title    string
+		bindings []binding
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+	// 1. Agrupamos lógicamente los atajos
+	categories := []category{
+		{
+			title: "▶ Reproducción",
+			bindings: []binding{
+				{"espacio", "Play / Pausa"},
+				{"n / N", "Sig / Anterior"},
+				{"> / <", "Adel. / Atrasar"},
+				{"0", "Reiniciar"},
+			},
+		},
+		{
+			title: "🧭 Navegación",
+			bindings: []binding{
+				{"↑↓ / jk", "Mover cursor"},
+				{"enter", "Reproducir"},
+				{"d", "Eliminar de cola"},
+				{"l", "Ocultar cola"},
+			},
+		},
+		{
+			title: "🎛 Audio & Modos",
+			bindings: []binding{
+				{"+ / -", "Volumen"},
+				{"m", "Silenciar"},
+				{"r", "Repetir"},
+				{"s", "Aleatorio"},
+			},
+		},
+		{
+			title: "⚙️ Sistema",
+			bindings: []binding{
+				{"h / ?", "Ocultar ayuda"},
+				{"q", "Salir"},
+			},
+		},
+	}
+
+	// 2. Renderizamos cada categoría como un bloque vertical
+	var blocks []string
+	for _, cat := range categories {
+		var lines []string
+		lines = append(lines, helpCategoryStyle.Render(cat.title))
+
+		for _, b := range cat.bindings {
+			keyView := helpKeyStyle.Render(b.key)
+			descView := helpDescStyle.Render(b.desc)
+
+			// Unimos la tecla (badge) con su descripción horizontalmente
+			row := lipgloss.JoinHorizontal(lipgloss.Left, keyView, descView)
+			lines = append(lines, row)
+		}
+
+		// Unimos todas las filas de esta categoría
+		block := lipgloss.JoinVertical(lipgloss.Left, lines...)
+		blocks = append(blocks, block)
+	}
+
+	// 3. Lógica Responsiva (Rejilla / Grid)
+	var rows []string
+	var colsPerRow int
+
+	// Ajustamos cuántas columnas mostrar según el ancho de la terminal
+	if m.width > 120 {
+		colsPerRow = 4 // Todo en una sola fila horizontal
+	} else if m.width > 75 {
+		colsPerRow = 2 // Rejilla 2x2
+	} else {
+		colsPerRow = 1 // Vertical clásico para terminales estrechas
+	}
+
+	// Chunking: Agrupamos los bloques en filas dependiendo de colsPerRow
+	for i := 0; i < len(blocks); i += colsPerRow {
+		end := i + colsPerRow
+		if end > len(blocks) {
+			end = len(blocks)
+		}
+
+		var rowBlocks []string
+		for _, block := range blocks[i:end] {
+			// Forzamos un ancho mínimo por bloque (32) para que las columnas
+			// respiren y no colisionen los textos.
+			paddedBlock := lipgloss.NewStyle().Width(32).Render(block)
+			rowBlocks = append(rowBlocks, paddedBlock)
+		}
+
+		// Unimos las columnas de esta fila horizontalmente
+		rowView := lipgloss.JoinHorizontal(lipgloss.Top, rowBlocks...)
+		rows = append(rows, rowView)
+
+		// Separación adicional si hay múltiples filas de categorías
+		if end < len(blocks) {
+			rows = append(rows, "")
+		}
+	}
+
+	// 4. Empaquetamos todo en un contenedor con borde
+	grid := lipgloss.JoinVertical(lipgloss.Left, rows...)
+	return helpContainerStyle.Render(grid)
 }
 
 func (m AppModel) renderErrorScreen() string {
-	msg := lipgloss.NewStyle().
-		Foreground(red).
+	errStyle := lipgloss.NewStyle().
 		Bold(true).
-		MarginLeft(2).
-		Render("✖ Error: " + m.lastError.Error())
+		Foreground(foreground).
+		Background(red).
+		Padding(1, 2)
 
-	hint := lipgloss.NewStyle().
-		Foreground(comment).
-		MarginLeft(2).
-		Render("Presiona 'q' para salir.")
+	if m.lastError == nil {
+		return ""
+	}
 
-	return "\n" + msg + "\n\n" + hint
+	msg := fmt.Sprintf("CRITICAL ERROR:\n\n%v\n\nPresiona 'q' para salir o espera a recuperarte.", m.lastError)
+	return errStyle.Render(msg)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// UTILIDADES[cite: 1]
+// UTILIDADES
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func formatDuration(d time.Duration) string {
-	if d < 0 {
-		d = 0
-	}
 	d = d.Round(time.Second)
-	minutes := int(d.Minutes())
-	seconds := int(d.Seconds()) % 60
-	return fmt.Sprintf("%d:%02d", minutes, seconds)
+	m := d / time.Minute
+	s := (d % time.Minute) / time.Second
+	return fmt.Sprintf("%02d:%02d", m, s)
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	if maxLen <= 3 {
-		return s[:maxLen]
-	}
-	return s[:maxLen-3] + "..."
-}
-
-func clampDuration(value, min, max time.Duration) time.Duration {
-	if value < min {
+func clampDuration(val, min, max time.Duration) time.Duration {
+	if val < min {
 		return min
 	}
-	if value > max {
+	if val > max {
 		return max
 	}
-	return value
+	return val
 }
 
-func renderVolumeBar(current, max, min float64) string {
-	const bars = 10
-	rangeSize := max - min
-	if rangeSize == 0 {
-		return strings.Repeat("░", bars)
+func truncate(str string, max int) string {
+	if len(str) > max {
+		return str[:max-3] + "..."
 	}
-
-	normalized := (current - min) / rangeSize
-	filled := int(normalized * bars)
-	if filled < 0 {
-		filled = 0
-	}
-	if filled > bars {
-		filled = bars
-	}
-
-	return lipgloss.NewStyle().Foreground(cyan).Render(strings.Repeat("█", filled)) +
-		lipgloss.NewStyle().Foreground(comment).Render(strings.Repeat("░", bars-filled))
+	return str
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PUNTO DE ENTRADA[cite: 1]
+// MAIN
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func main() {
-	model := NewAppModel()
-	program := tea.NewProgram(model, tea.WithAltScreen())
-
-	if _, err := program.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error al iniciar GoPlayer: %v\n", err)
+	p := tea.NewProgram(NewAppModel(), tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Printf("Error al iniciar el reproductor: %v\n", err)
 		os.Exit(1)
 	}
 }
