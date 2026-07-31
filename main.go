@@ -17,57 +17,105 @@ import (
 	"github.com/faiface/beep/wav"
 )
 
-// ═══════════════════════════════════════════════════════════════
-//  ESTADOS DEL REPRODUCTOR
-// ═══════════════════════════════════════════════════════════════
-
-type PlayerState int
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONFIGURACIÓN Y CONSTANTES
+// ═══════════════════════════════════════════════════════════════════════════════
 
 const (
-	StateStopped PlayerState = iota
+	appName         = "🎵 GoPlayer"
+	appSubtitle     = "Reproductor de música TUI"
+	defaultDir      = "./music"
+	seekSeconds     = 10
+	volumeStep      = 0.5
+	maxVolume       = 5.0
+	minVolume       = -5.0
+	progressWidth   = 50
+	defaultDuration = 3 * time.Minute // fallback cuando no hay metadata
+
+	// NUEVO: Tasa de muestreo estándar para evitar aceleración (Chipmunk effect)
+	standardSampleRate = beep.SampleRate(44100)
+)
+
+// Paleta de colores: tema Dracula optimizado para legibilidad en terminal[cite: 1]
+var (
+	pink       = lipgloss.Color("#FF79C6")
+	cyan       = lipgloss.Color("#8BE9FD")
+	green      = lipgloss.Color("#50FA7B")
+	yellow     = lipgloss.Color("#F1FA8C")
+	orange     = lipgloss.Color("#FFB86C")
+	red        = lipgloss.Color("#FF5555")
+	purple     = lipgloss.Color("#BD93F9")
+	foreground = lipgloss.Color("#F8F8F2")
+	comment    = lipgloss.Color("#6272A4")
+	selection  = lipgloss.Color("#44475A")
+	background = lipgloss.Color("#282A36")
+)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DOMINIO: MODELOS DE DATOS[cite: 1]
+// ═══════════════════════════════════════════════════════════════════════════════
+
+type PlaybackState int
+
+const (
+	StateStopped PlaybackState = iota
 	StatePlaying
 	StatePaused
 )
 
-func (s PlayerState) String() string {
+func (s PlaybackState) Icon() string {
 	switch s {
 	case StatePlaying:
-		return "▶ Reproduciendo"
+		return "▶"
 	case StatePaused:
-		return "⏸ Pausado"
+		return "⏸"
 	default:
-		return "⏹ Detenido"
+		return "⏹"
 	}
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MODOS DE REPETICIÓN
-// ═══════════════════════════════════════════════════════════════
+func (s PlaybackState) Label() string {
+	switch s {
+	case StatePlaying:
+		return "Reproduciendo"
+	case StatePaused:
+		return "Pausado"
+	default:
+		return "Detenido"
+	}
+}
 
 type RepeatMode int
 
 const (
-	RepeatNone RepeatMode = iota
+	RepeatOff RepeatMode = iota
 	RepeatOne
 	RepeatAll
 )
 
-func (r RepeatMode) String() string {
+func (r RepeatMode) Icon() string {
 	switch r {
 	case RepeatOne:
-		return "🔂 Repetir una"
+		return "🔂"
 	case RepeatAll:
-		return "🔁 Repetir todo"
+		return "🔁"
 	default:
-		return "➡ Sin repetir"
+		return "➡"
 	}
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  CANCIÓN
-// ═══════════════════════════════════════════════════════════════
+func (r RepeatMode) Label() string {
+	switch r {
+	case RepeatOne:
+		return "Repetir una"
+	case RepeatAll:
+		return "Repetir todo"
+	default:
+		return "Sin repetir"
+	}
+}
 
-type Song struct {
+type Track struct {
 	ID       string
 	Title    string
 	Artist   string
@@ -76,839 +124,1048 @@ type Song struct {
 	Path     string
 }
 
-func (s Song) String() string {
-	if s.Artist == "" {
-		return s.Title
+func (t Track) DisplayName() string {
+	if t.Artist == "" {
+		return t.Title
 	}
-	return s.Artist + " - " + s.Title
+	return fmt.Sprintf("%s — %s", t.Artist, t.Title)
 }
 
-func (s Song) DurationStr() string {
-	if s.Duration <= 0 {
+func (t Track) FormattedDuration() string {
+	if t.Duration <= 0 {
 		return "?:??"
 	}
-	m := int(s.Duration.Minutes())
-	sec := int(s.Duration.Seconds()) % 60
-	return fmt.Sprintf("%d:%02d", m, sec)
+	return formatDuration(t.Duration)
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  COLA DE REPRODUCCIÓN
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// DOMINIO: GESTIÓN DE LA LISTA DE REPRODUCCIÓN[cite: 1]
+// ═══════════════════════════════════════════════════════════════════════════════
 
-type Queue struct {
-	songs   []Song
+type Playlist struct {
+	tracks  []Track
 	current int
 	shuffle bool
 	repeat  RepeatMode
 }
 
-func NewQueue() *Queue {
-	return &Queue{
-		songs:   make([]Song, 0),
+func NewPlaylist() *Playlist {
+	return &Playlist{
+		tracks:  make([]Track, 0),
 		current: -1,
 	}
 }
 
-func (q *Queue) Add(song Song) {
-	q.songs = append(q.songs, song)
-	if q.current == -1 {
-		q.current = 0
+func (p *Playlist) Add(track Track) {
+	p.tracks = append(p.tracks, track)
+	if p.current == -1 {
+		p.current = 0
 	}
 }
 
-func (q *Queue) Remove(index int) {
-	if index < 0 || index >= len(q.songs) {
+func (p *Playlist) Remove(index int) {
+	if !p.isValidIndex(index) {
 		return
 	}
-	q.songs = append(q.songs[:index], q.songs[index+1:]...)
-	if q.current >= len(q.songs) {
-		q.current = len(q.songs) - 1
+	p.tracks = append(p.tracks[:index], p.tracks[index+1:]...)
+
+	if p.current >= len(p.tracks) {
+		p.current = len(p.tracks) - 1
 	}
-	if len(q.songs) == 0 {
-		q.current = -1
+	if len(p.tracks) == 0 {
+		p.current = -1
 	}
 }
 
-func (q *Queue) Current() (Song, bool) {
-	if q.current < 0 || q.current >= len(q.songs) {
-		return Song{}, false
+func (p *Playlist) Current() (Track, bool) {
+	if !p.isValidIndex(p.current) {
+		return Track{}, false
 	}
-	return q.songs[q.current], true
+	return p.tracks[p.current], true
 }
 
-func (q *Queue) Next() (Song, bool) {
-	if len(q.songs) == 0 {
-		return Song{}, false
+func (p *Playlist) Next() (Track, bool) {
+	if len(p.tracks) == 0 {
+		return Track{}, false
 	}
 
-	switch q.repeat {
+	switch p.repeat {
 	case RepeatOne:
-		return q.songs[q.current], true
+		return p.tracks[p.current], true
 	case RepeatAll:
-		q.current = (q.current + 1) % len(q.songs)
-		return q.songs[q.current], true
+		p.current = (p.current + 1) % len(p.tracks)
+		return p.tracks[p.current], true
 	default:
-		if q.current+1 >= len(q.songs) {
-			return Song{}, false
+		if p.isLast() {
+			return Track{}, false
 		}
-		q.current++
-		return q.songs[q.current], true
+		p.current++
+		return p.tracks[p.current], true
 	}
 }
 
-func (q *Queue) Prev() (Song, bool) {
-	if len(q.songs) == 0 {
-		return Song{}, false
+func (p *Playlist) Previous() (Track, bool) {
+	if len(p.tracks) == 0 || p.current <= 0 {
+		return Track{}, false
 	}
-	if q.current <= 0 {
-		return Song{}, false
-	}
-	q.current--
-	return q.songs[q.current], true
+	p.current--
+	return p.tracks[p.current], true
 }
 
-func (q *Queue) SetCurrent(index int) bool {
-	if index < 0 || index >= len(q.songs) {
+func (p *Playlist) JumpTo(index int) bool {
+	if !p.isValidIndex(index) {
 		return false
 	}
-	q.current = index
+	p.current = index
 	return true
 }
 
-func (q *Queue) Len() int {
-	return len(q.songs)
+func (p *Playlist) Length() int {
+	return len(p.tracks)
 }
 
-func (q *Queue) IsLast() bool {
-	if q.repeat != RepeatNone {
+func (p *Playlist) IsEmpty() bool {
+	return len(p.tracks) == 0
+}
+
+func (p *Playlist) isLast() bool {
+	if p.repeat != RepeatOff {
 		return false
 	}
-	return q.current >= len(q.songs)-1
+	return p.current >= len(p.tracks)-1
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MENSAJES PERSONALIZADOS
-// ═══════════════════════════════════════════════════════════════
+func (p *Playlist) isValidIndex(index int) bool {
+	return index >= 0 && index < len(p.tracks)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INFRAESTRUCTURA: MOTOR DE AUDIO
+// ═══════════════════════════════════════════════════════════════════════════════
+
+type AudioEngine struct {
+	streamer   beep.StreamSeekCloser
+	ctrl       *beep.Ctrl
+	volume     *effects.Volume
+	format     beep.Format
+	isInit     bool
+	sessionID  int
+	cancelChan chan struct{}
+}
+
+func NewAudioEngine() *AudioEngine {
+	return &AudioEngine{}
+}
+
+// Load decodifica un archivo de audio, calcula la duración real y remuestrea.
+// CORRECCIÓN: Ahora devuelve la duración calculada matemáticamente.
+func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
+	ae.Stop() // Limpieza preventiva[cite: 1]
+
+	file, err := os.Open(track.Path)
+	if err != nil {
+		return 0, fmt.Errorf("abrir archivo: %w", err)
+	}
+
+	// Intentar MP3 primero, fallback a WAV[cite: 1]
+	streamer, format, err := mp3.Decode(file)
+	if err != nil {
+		file.Close()
+		file, err = os.Open(track.Path)
+		if err != nil {
+			return 0, fmt.Errorf("reabrir archivo: %w", err)
+		}
+		streamer, format, err = wav.Decode(file)
+		if err != nil {
+			file.Close()
+			return 0, fmt.Errorf("formato no soportado: %s", track.Path)
+		}
+	}
+
+	// CORRECCIÓN: Calcular duración exacta usando el número de frames y la tasa original.
+	realDuration := format.SampleRate.D(streamer.Len())
+
+	// CORRECCIÓN: Inicializar speaker una sola vez con la tasa de muestreo ESTÁNDAR.
+	if !ae.isInit {
+		speaker.Init(standardSampleRate, standardSampleRate.N(time.Second/10))
+		ae.isInit = true
+	}
+
+	ae.streamer = streamer
+	ae.format = format
+
+	// CORRECCIÓN: Remuestrear el audio original a nuestra tasa estándar para evitar cambios de velocidad.
+	resampled := beep.Resample(4, format.SampleRate, standardSampleRate, streamer)
+
+	ae.ctrl = &beep.Ctrl{Streamer: resampled}
+	ae.volume = &effects.Volume{
+		Streamer: ae.ctrl,
+		Base:     2,
+		Volume:   0,
+		Silent:   false,
+	}
+
+	return realDuration, nil
+}
+
+func (ae *AudioEngine) Play() chan struct{} {
+	done := make(chan struct{})
+	speaker.Play(beep.Seq(ae.volume, beep.Callback(func() {
+		close(done)
+	})))
+	return done
+}
+
+func (ae *AudioEngine) Stop() {
+	speaker.Clear()
+
+	if ae.cancelChan != nil {
+		close(ae.cancelChan)
+		ae.cancelChan = nil
+	}
+	if ae.streamer != nil {
+		ae.streamer.Close()
+		ae.streamer = nil
+	}
+	ae.ctrl = nil
+	ae.volume = nil
+}
+
+func (ae *AudioEngine) SetVolume(level float64) {
+	if ae.volume != nil {
+		ae.volume.Volume = level
+	}
+}
+
+func (ae *AudioEngine) ToggleMute() {
+	if ae.volume != nil {
+		ae.volume.Silent = !ae.volume.Silent
+	}
+}
+
+func (ae *AudioEngine) IsMuted() bool {
+	return ae.volume != nil && ae.volume.Silent
+}
+
+// CORRECCIÓN: Obtener la posición real del stream de audio para la barra de progreso.
+func (ae *AudioEngine) Position() time.Duration {
+	if ae.streamer != nil {
+		return ae.format.SampleRate.D(ae.streamer.Position())
+	}
+	return 0
+}
+
+func (ae *AudioEngine) Seek(position time.Duration) error {
+	if ae.streamer == nil {
+		return fmt.Errorf("no hay stream activo")
+	}
+
+	seeker, ok := ae.streamer.(beep.StreamSeeker)
+	if !ok {
+		return fmt.Errorf("formato no permite seek")
+	}
+
+	// Usamos la tasa original del archivo para el seek, no la estándar
+	sampleRate := int(ae.format.SampleRate)
+	samples := int(position.Seconds()) * sampleRate
+
+	if err := seeker.Seek(samples); err != nil {
+		return fmt.Errorf("seek fallido: %w", err)
+	}
+	return nil
+}
+
+func (ae *AudioEngine) Close() {
+	ae.Stop()
+	if ae.isInit {
+		speaker.Close()
+	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// APLICACIÓN: MENSAJES PERSONALIZADOS
+// ═══════════════════════════════════════════════════════════════════════════════
 
 type (
-	songLoadedMsg struct {
-		streamer beep.StreamSeekCloser
-		format   beep.Format
-		song     Song
+	trackLoadedMsg struct {
+		track    Track
+		duration time.Duration // CORRECCIÓN: Incluir la duración real
 	}
 
-	playbackFinishedMsg struct {
-		id int // ID de la sesión de reproducción
+	playbackEndedMsg struct {
+		sessionID int
 	}
 
-	tickMsg struct{}
+	tickMsg time.Time
 
-	errMsg struct {
+	libraryScannedMsg struct {
+		tracks []Track
+	}
+
+	errorMsg struct {
 		err error
 	}
-
-	scanDirMsg struct {
-		songs []Song
-	}
 )
 
-// ═══════════════════════════════════════════════════════════════
-//  ESTILOS
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// APLICACIÓN: MODELO DE LA UI (Bubble Tea)[cite: 1]
+// ═══════════════════════════════════════════════════════════════════════════════
 
-var (
-	colorPink    = lipgloss.Color("#FF79C6")
-	colorCyan    = lipgloss.Color("#8BE9FD")
-	colorGreen   = lipgloss.Color("#50FA7B")
-	colorYellow  = lipgloss.Color("#F1FA8C")
-	colorOrange  = lipgloss.Color("#FFB86C")
-	colorRed     = lipgloss.Color("#FF5555")
-	colorPurple  = lipgloss.Color("#BD93F9")
-	colorFg      = lipgloss.Color("#F8F8F2")
-	colorComment = lipgloss.Color("#6272A4")
-	colorCurrent = lipgloss.Color("#44475A")
+type AppModel struct {
+	playlist *Playlist
+	audio    *AudioEngine
 
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(colorPink).MarginLeft(2).MarginTop(1)
-	subtitleStyle = lipgloss.NewStyle().Foreground(colorComment).MarginLeft(2)
-	playingStyle  = lipgloss.NewStyle().Bold(true).Foreground(colorGreen)
-	pausedStyle   = lipgloss.NewStyle().Bold(true).Foreground(colorYellow)
-	stoppedStyle  = lipgloss.NewStyle().Bold(true).Foreground(colorRed)
-	infoStyle     = lipgloss.NewStyle().Foreground(colorFg).MarginLeft(2)
-	controlsStyle = lipgloss.NewStyle().Foreground(colorComment).MarginLeft(2).MarginBottom(1)
-	helpKeyStyle  = lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
-	helpDescStyle = lipgloss.NewStyle().Foreground(colorComment)
-	errorStyle    = lipgloss.NewStyle().Foreground(colorRed).Bold(true).MarginLeft(2)
-	boxStyle      = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorPurple).
-			Padding(1, 2).
-			MarginLeft(2).
-			MarginRight(2)
-)
+	state       PlaybackState
+	elapsed     time.Duration
+	totalTime   time.Duration
+	cursorIndex int
+	volumeLevel float64
+	lastError   error
 
-// ═══════════════════════════════════════════════════════════════
-//  MODELO PRINCIPAL
-// ═══════════════════════════════════════════════════════════════
-
-type Model struct {
-	state    PlayerState
-	queue    *Queue
-	lastSong Song
-
-	// Audio
-	streamer           beep.StreamSeekCloser
-	format             beep.Format
-	ctrl               *beep.Ctrl
-	volCtrl            *effects.Volume
-	volLevel           float64
-	speakerInitialized bool
-
-	// Control de sesión para evitar race conditions al cambiar de canción
-	playbackID     int
-	cancelPlayback chan struct{}
-
-	// UI
-	width     int
-	height    int
-	cursor    int
-	progress  progress.Model
-	showHelp  bool
-	showQueue bool
-
-	// Tiempos
-	elapsed  time.Duration
-	duration time.Duration
-
-	// Errores
-	err error
+	width       int
+	height      int
+	progressBar progress.Model
+	showHelp    bool
+	showQueue   bool
 }
 
-func NewModel() Model {
-	p := progress.New(progress.WithDefaultGradient())
-	p.Width = 50
-	p.ShowPercentage = false
+func NewAppModel() AppModel {
+	bar := progress.New(progress.WithDefaultGradient())
+	bar.Width = progressWidth
+	bar.ShowPercentage = false
 
-	return Model{
-		queue:    NewQueue(),
-		state:    StateStopped,
-		progress: p,
-		volLevel: 0,
-		showHelp: true,
+	return AppModel{
+		playlist:    NewPlaylist(),
+		audio:       NewAudioEngine(),
+		state:       StateStopped,
+		progressBar: bar,
+		volumeLevel: 0,
+		showHelp:    true,
+		showQueue:   true,
 	}
 }
 
-func (m Model) Init() tea.Cmd {
+func (m AppModel) Init() tea.Cmd {
 	return tea.Batch(
-		m.scanMusicDir(),
-		m.tickCmd(),
+		m.scanLibrary(),
+		m.tick(),
 	)
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  COMANDOS
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// APLICACIÓN: COMANDOS (tea.Cmd)
+// ═══════════════════════════════════════════════════════════════════════════════
 
-func (m Model) scanMusicDir() tea.Cmd {
+func (m AppModel) tick() tea.Cmd {
+	// CORRECCIÓN: Ticks más rápidos para una barra suave, ya que ahora consultamos al motor de audio.
+	return tea.Tick(time.Millisecond*250, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+func (m AppModel) scanLibrary() tea.Cmd {
 	return func() tea.Msg {
-		home, _ := os.UserHomeDir()
-		dirs := []string{
-			"./music",
-			"./songs",
-			filepath.Join(home, "Music"),
-			filepath.Join(home, "Música"),
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = ""
 		}
 
-		var songs []Song
+		dirs := []string{defaultDir, "./songs"}
+		if home != "" {
+			dirs = append(dirs,
+				filepath.Join(home, "Music"),
+				filepath.Join(home, "Música"),
+			)
+		}
+
+		var found []Track
 		for _, dir := range dirs {
 			if _, err := os.Stat(dir); os.IsNotExist(err) {
 				continue
 			}
+
 			entries, err := os.ReadDir(dir)
 			if err != nil {
 				continue
 			}
+
 			for _, entry := range entries {
 				if entry.IsDir() {
 					continue
 				}
+
 				ext := strings.ToLower(filepath.Ext(entry.Name()))
 				if ext != ".mp3" && ext != ".wav" {
 					continue
 				}
+
 				path := filepath.Join(dir, entry.Name())
-				name := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-				songs = append(songs, Song{
-					ID:     fmt.Sprintf("%d", len(songs)),
+				name := strings.TrimSuffix(entry.Name(), ext)
+
+				found = append(found, Track{
+					ID:     fmt.Sprintf("track-%d", len(found)),
 					Title:  name,
 					Artist: "Desconocido",
 					Path:   path,
+					// Nota: La duración real ahora se obtiene al hacer Load() en el motor de audio.
 				})
 			}
 		}
-		return scanDirMsg{songs: songs}
+
+		return libraryScannedMsg{tracks: found}
 	}
 }
 
-func (m Model) loadSongCmd(song Song) tea.Cmd {
+func (m AppModel) loadTrackCmd(track Track) tea.Cmd {
 	return func() tea.Msg {
-		f, err := os.Open(song.Path)
+		// CORRECCIÓN: Extraer la duración real desde Load()
+		duration, err := m.audio.Load(track)
 		if err != nil {
-			return errMsg{err}
+			return errorMsg{err}
 		}
-
-		// Intentar MP3
-		streamer, format, err := mp3.Decode(f)
-		if err != nil {
-			f.Close()
-			f, err = os.Open(song.Path)
-			if err != nil {
-				return errMsg{err}
-			}
-			streamer, format, err = wav.Decode(f)
-			if err != nil {
-				f.Close()
-				return errMsg{fmt.Errorf("formato no soportado: %s", song.Path)}
-			}
-		}
-
-		return songLoadedMsg{
-			streamer: streamer,
-			format:   format,
-			song:     song,
-		}
+		// Actualizar el track temporalmente para mostrarlo en la UI antes del Update
+		track.Duration = duration
+		return trackLoadedMsg{track: track, duration: duration}
 	}
 }
 
-func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
-		return tickMsg{}
-	})
-}
+// ═══════════════════════════════════════════════════════════════════════════════
+// APLICACIÓN: ACTUALIZACIÓN DE ESTADO (Update)[cite: 1]
+// ═══════════════════════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-//  UPDATE
-// ═══════════════════════════════════════════════════════════════
-
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
+func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.progress.Width = msg.Width - 20
-		if m.progress.Width < 30 {
-			m.progress.Width = 30
-		}
-
+		return m.handleResize(msg)
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "ctrl+c":
-			m.cleanup()
-			return m, tea.Quit
-
-		case " ":
-			return m.togglePlayPause()
-
-		case "n":
-			return m.playNext()
-
-		case "N":
-			return m.playPrevious()
-
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-
-		case "down", "j":
-			if m.cursor < m.queue.Len()-1 {
-				m.cursor++
-			}
-
-		case "enter":
-			if m.cursor >= 0 && m.cursor < m.queue.Len() {
-				m.queue.SetCurrent(m.cursor)
-				return m.playCurrent()
-			}
-
-		case "d":
-			if m.cursor >= 0 && m.cursor < m.queue.Len() {
-				wasCurrent := m.cursor == m.queue.current
-				m.queue.Remove(m.cursor)
-				if m.cursor >= m.queue.Len() && m.cursor > 0 {
-					m.cursor--
-				}
-				if wasCurrent {
-					m.cleanupAudio()
-					m.state = StateStopped
-					m.elapsed = 0
-					m.duration = 0
-					if m.queue.Len() > 0 {
-						return m.playCurrent()
-					}
-				}
-			}
-
-		case "+", "=":
-			m.volumeUp()
-
-		case "-":
-			m.volumeDown()
-
-		case "m":
-			m.toggleMute()
-
-		case "s":
-			m.queue.shuffle = !m.queue.shuffle
-
-		case "r":
-			m.queue.repeat = (m.queue.repeat + 1) % 3
-
-		case "l":
-			m.showQueue = !m.showQueue
-
-		case "h", "?":
-			m.showHelp = !m.showHelp
-
-		case "0":
-			m.seekTo(0)
-
-		case ".", ">":
-			m.seekForward(10)
-
-		case ",", "<":
-			m.seekBackward(10)
-		}
-
-	case scanDirMsg:
-		for _, s := range msg.songs {
-			m.queue.Add(s)
-		}
-		if m.queue.Len() > 0 && m.state == StateStopped {
-			m.queue.current = 0
-		}
-
-	case songLoadedMsg:
-		// ─── Limpieza robusta de la reproducción anterior ───
-		m.cleanupAudio()
-
-		m.playbackID++
-		currentID := m.playbackID
-
-		m.cancelPlayback = make(chan struct{})
-		cancel := m.cancelPlayback
-
-		// Inicializar speaker UNA SOLA VEZ
-		if !m.speakerInitialized {
-			speaker.Init(msg.format.SampleRate, msg.format.SampleRate.N(time.Second/10))
-			m.speakerInitialized = true
-		}
-
-		m.streamer = msg.streamer
-		m.format = msg.format
-		m.lastSong = msg.song
-
-		m.ctrl = &beep.Ctrl{Streamer: msg.streamer}
-		m.volCtrl = &effects.Volume{
-			Streamer: m.ctrl,
-			Base:     2,
-			Volume:   m.volLevel,
-			Silent:   false,
-		}
-
-		// Canal para detectar fin de canción
-		done := make(chan struct{})
-		speaker.Play(beep.Seq(m.volCtrl, beep.Callback(func() {
-			close(done)
-		})))
-
-		m.state = StatePlaying
-		m.duration = msg.song.Duration
-		if m.duration <= 0 {
-			m.duration = time.Minute * 3
-		}
-		m.elapsed = 0
-
-		// Goroutine que espera el fin de canción o cancelación
-		cmds = append(cmds, m.tickCmd())
-		cmds = append(cmds, func() tea.Msg {
-			select {
-			case <-done:
-				return playbackFinishedMsg{id: currentID}
-			case <-cancel:
-				return nil
-			}
-		})
-
+		return m.handleKeyInput(msg)
+	case libraryScannedMsg:
+		return m.handleLibraryScanned(msg)
+	case trackLoadedMsg:
+		return m.handleTrackLoaded(msg)
 	case tickMsg:
-		if m.state == StatePlaying {
-			m.elapsed += time.Second
-			if m.elapsed > m.duration {
-				m.elapsed = m.duration
-			}
-			cmds = append(cmds, m.tickCmd())
-		}
-
-	case playbackFinishedMsg:
-		// Ignorar si el ID no coincide (callback de canción anterior)
-		if msg.id != m.playbackID {
-			return m, nil
-		}
-		if m.queue.IsLast() && m.queue.repeat == RepeatNone {
-			m.state = StateStopped
-			m.elapsed = 0
-			m.cleanupAudio()
-		} else {
-			return m.playNext()
-		}
-
-	case errMsg:
-		m.err = msg.err
-		m.state = StateStopped
+		return m.handleTick()
+	case playbackEndedMsg:
+		return m.handlePlaybackEnded(msg)
+	case errorMsg:
+		return m.handleError(msg)
+	default:
+		return m, nil
 	}
-
-	return m, tea.Batch(cmds...)
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  ACCIONES DEL REPRODUCTOR
-// ═══════════════════════════════════════════════════════════════
+func (m AppModel) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
+	m.width = msg.Width
+	m.height = msg.Height
 
-func (m Model) togglePlayPause() (Model, tea.Cmd) {
-	if m.ctrl == nil {
-		return m.playCurrent()
+	newWidth := int(float64(msg.Width) * 0.7)
+	if newWidth < 30 {
+		newWidth = 30
 	}
-
-	switch m.state {
-	case StatePlaying:
-		m.ctrl.Paused = true
-		m.state = StatePaused
-		speaker.Lock()
-		speaker.Unlock()
-
-	case StatePaused:
-		m.ctrl.Paused = false
-		m.state = StatePlaying
-		return m, tea.Batch(m.tickCmd())
-
-	case StateStopped:
-		return m.playCurrent()
-	}
+	m.progressBar.Width = newWidth
 
 	return m, nil
 }
 
-func (m Model) playCurrent() (Model, tea.Cmd) {
-	song, ok := m.queue.Current()
-	if !ok {
-		return m, nil
+func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		m.shutdown()
+		return m, tea.Quit
+	case " ":
+		return m.togglePlayback()
+	case "n":
+		return m.playNext()
+	case "N":
+		return m.playPrevious()
+	case "enter":
+		return m.playSelected()
+	case "up", "k":
+		m.moveCursor(-1)
+	case "down", "j":
+		m.moveCursor(1)
+	case "d":
+		return m.removeSelected()
+	case "+", "=":
+		m.adjustVolume(volumeStep)
+	case "-":
+		m.adjustVolume(-volumeStep)
+	case "m":
+		m.audio.ToggleMute()
+	case "0":
+		m.seekTo(0)
+	case ".", ">":
+		m.seekForward(seekSeconds)
+	case ",", "<":
+		m.seekBackward(seekSeconds)
+	case "s":
+		m.playlist.shuffle = !m.playlist.shuffle
+	case "r":
+		m.playlist.repeat = (m.playlist.repeat + 1) % 3
+	case "l":
+		m.showQueue = !m.showQueue
+	case "h", "?":
+		m.showHelp = !m.showHelp
 	}
-	return m, m.loadSongCmd(song)
+	return m, nil
 }
 
-func (m Model) playNext() (Model, tea.Cmd) {
-	song, ok := m.queue.Next()
-	if !ok {
+func (m AppModel) handleLibraryScanned(msg libraryScannedMsg) (tea.Model, tea.Cmd) {
+	for _, track := range msg.tracks {
+		m.playlist.Add(track)
+	}
+	if !m.playlist.IsEmpty() && m.state == StateStopped {
+		m.playlist.current = 0
+	}
+	return m, nil
+}
+
+func (m AppModel) handleTrackLoaded(msg trackLoadedMsg) (tea.Model, tea.Cmd) {
+	m.audio.sessionID++
+	sessionID := m.audio.sessionID
+	m.audio.cancelChan = make(chan struct{})
+	cancel := m.audio.cancelChan
+
+	done := m.audio.Play()
+
+	// CORRECCIÓN: Asignar la duración 100% real de la pista
+	m.state = StatePlaying
+	m.totalTime = msg.duration
+	if m.totalTime <= 0 {
+		m.totalTime = defaultDuration
+	}
+
+	// Actualizamos la duración en el playlist para que se vea en la cola
+	m.playlist.tracks[m.playlist.current].Duration = msg.duration
+
+	m.elapsed = 0
+
+	waitCmd := func() tea.Msg {
+		select {
+		case <-done:
+			return playbackEndedMsg{sessionID: sessionID}
+		case <-cancel:
+			return nil
+		}
+	}
+
+	return m, tea.Batch(m.tick(), waitCmd)
+}
+
+func (m AppModel) handleTick() (tea.Model, tea.Cmd) {
+	if m.state == StatePlaying {
+		// CORRECCIÓN: El elapsed se basa en la posición del audio, no en la suma de ticks.
+		m.elapsed = m.audio.Position()
+
+		if m.elapsed > m.totalTime {
+			m.elapsed = m.totalTime
+		}
+		return m, m.tick()
+	}
+	return m, nil
+}
+
+func (m AppModel) handlePlaybackEnded(msg playbackEndedMsg) (tea.Model, tea.Cmd) {
+	if msg.sessionID != m.audio.sessionID {
+		return m, nil
+	}
+
+	if m.playlist.isLast() && m.playlist.repeat == RepeatOff {
 		m.state = StateStopped
-		m.cleanupAudio()
 		m.elapsed = 0
-		return m, nil
+		m.audio.Stop()
+	} else {
+		return m.playNext()
 	}
-	m.cursor = m.queue.current
-	return m, m.loadSongCmd(song)
+	return m, nil
 }
 
-func (m Model) playPrevious() (Model, tea.Cmd) {
-	if m.elapsed > 3*time.Second && m.streamer != nil {
+func (m AppModel) handleError(msg errorMsg) (tea.Model, tea.Cmd) {
+	m.lastError = msg.err
+	m.state = StateStopped
+	return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+		return errorMsg{err: nil}
+	})
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// APLICACIÓN: ACCIONES DEL REPRODUCTOR[cite: 1]
+// ═══════════════════════════════════════════════════════════════════════════════
+
+func (m AppModel) togglePlayback() (tea.Model, tea.Cmd) {
+	switch m.state {
+	case StatePlaying:
+		m.audio.ctrl.Paused = true
+		m.state = StatePaused
+	case StatePaused:
+		m.audio.ctrl.Paused = false
+		m.state = StatePlaying
+		return m, m.tick()
+	case StateStopped:
+		return m.playCurrent()
+	}
+	return m, nil
+}
+
+func (m AppModel) playCurrent() (tea.Model, tea.Cmd) {
+	track, ok := m.playlist.Current()
+	if !ok {
+		return m, nil
+	}
+	return m, m.loadTrackCmd(track)
+}
+
+func (m AppModel) playNext() (tea.Model, tea.Cmd) {
+	track, ok := m.playlist.Next()
+	if !ok {
+		m.resetPlayback()
+		return m, nil
+	}
+	m.cursorIndex = m.playlist.current
+	return m, m.loadTrackCmd(track)
+}
+
+func (m AppModel) playPrevious() (tea.Model, tea.Cmd) {
+	if m.elapsed > 3*time.Second {
 		m.seekTo(0)
 		return m, nil
 	}
 
-	song, ok := m.queue.Prev()
+	track, ok := m.playlist.Previous()
 	if !ok {
 		return m, nil
 	}
-	m.cursor = m.queue.current
-	return m, m.loadSongCmd(song)
+	m.cursorIndex = m.playlist.current
+	return m, m.loadTrackCmd(track)
 }
 
-func (m *Model) volumeUp() {
-	m.volLevel += 0.5
-	if m.volLevel > 5 {
-		m.volLevel = 5
+func (m AppModel) playSelected() (tea.Model, tea.Cmd) {
+	if !m.playlist.isValidIndex(m.cursorIndex) {
+		return m, nil
 	}
-	if m.volCtrl != nil {
-		m.volCtrl.Volume = m.volLevel
-	}
+	m.playlist.JumpTo(m.cursorIndex)
+	return m.playCurrent()
 }
 
-func (m *Model) volumeDown() {
-	m.volLevel -= 0.5
-	if m.volLevel < -5 {
-		m.volLevel = -5
+func (m AppModel) removeSelected() (tea.Model, tea.Cmd) {
+	if !m.playlist.isValidIndex(m.cursorIndex) {
+		return m, nil
 	}
-	if m.volCtrl != nil {
-		m.volCtrl.Volume = m.volLevel
+
+	wasPlaying := m.cursorIndex == m.playlist.current
+	m.playlist.Remove(m.cursorIndex)
+
+	if m.cursorIndex >= m.playlist.Length() && m.cursorIndex > 0 {
+		m.cursorIndex--
 	}
+
+	if wasPlaying {
+		m.resetPlayback()
+		if !m.playlist.IsEmpty() {
+			return m.playCurrent()
+		}
+	}
+	return m, nil
 }
 
-func (m *Model) toggleMute() {
-	if m.volCtrl != nil {
-		m.volCtrl.Silent = !m.volCtrl.Silent
+func (m *AppModel) moveCursor(delta int) {
+	newIndex := m.cursorIndex + delta
+	if newIndex < 0 {
+		newIndex = 0
 	}
+	if newIndex >= m.playlist.Length() {
+		newIndex = m.playlist.Length() - 1
+	}
+	m.cursorIndex = newIndex
 }
 
-func (m *Model) seekTo(pos time.Duration) {
-	if m.streamer == nil {
+func (m *AppModel) adjustVolume(delta float64) {
+	m.volumeLevel += delta
+	if m.volumeLevel > maxVolume {
+		m.volumeLevel = maxVolume
+	}
+	if m.volumeLevel < minVolume {
+		m.volumeLevel = minVolume
+	}
+	m.audio.SetVolume(m.volumeLevel)
+}
+
+func (m *AppModel) seekTo(position time.Duration) {
+	if err := m.audio.Seek(position); err != nil {
+		m.lastError = err
 		return
 	}
-	if pos < 0 {
-		pos = 0
-	}
-	if pos > m.duration {
-		pos = m.duration
-	}
-	sampleRate := int(m.format.SampleRate)
-	samples := int(pos.Seconds()) * sampleRate
-	m.streamer.Seek(samples)
-	m.elapsed = pos
+	m.elapsed = clampDuration(position, 0, m.totalTime)
 }
 
-func (m *Model) seekForward(seconds int) {
-	newPos := m.elapsed + time.Duration(seconds)*time.Second
-	if newPos > m.duration {
-		newPos = m.duration
-	}
-	m.seekTo(newPos)
+func (m *AppModel) seekForward(seconds int) {
+	m.seekTo(m.elapsed + time.Duration(seconds)*time.Second)
 }
 
-func (m *Model) seekBackward(seconds int) {
-	newPos := m.elapsed - time.Duration(seconds)*time.Second
-	if newPos < 0 {
-		newPos = 0
-	}
-	m.seekTo(newPos)
+func (m *AppModel) seekBackward(seconds int) {
+	m.seekTo(m.elapsed - time.Duration(seconds)*time.Second)
 }
 
-// cleanupAudio limpia el audio anterior de forma segura.
-// Usa speaker.Clear() para detener la cola antes de cerrar el streamer.
-func (m *Model) cleanupAudio() {
-	speaker.Clear()
-	if m.cancelPlayback != nil {
-		close(m.cancelPlayback)
-		m.cancelPlayback = nil
-	}
-	if m.streamer != nil {
-		m.streamer.Close()
-		m.streamer = nil
-	}
-	m.ctrl = nil
-	m.volCtrl = nil
+func (m *AppModel) resetPlayback() {
+	m.audio.Stop()
+	m.state = StateStopped
+	m.elapsed = 0
+	m.totalTime = 0
 }
 
-func (m *Model) cleanup() {
-	m.cleanupAudio()
-	speaker.Close()
+func (m *AppModel) shutdown() {
+	m.audio.Close()
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  VISTA
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// APLICACIÓN: VISTA (View) — RENDERIZADO POR COMPONENTES[cite: 1]
+// ═══════════════════════════════════════════════════════════════════════════════
 
-func (m Model) View() string {
-	if m.err != nil {
-		return "\n" + errorStyle.Render("✖ Error: "+m.err.Error()) +
-			"\n\n" + controlsStyle.Render("Presiona 'q' para salir.")
+func (m AppModel) View() string {
+	if m.lastError != nil {
+		return m.renderErrorScreen()
 	}
 
-	var sections []string
-	sections = append(sections, m.renderHeader())
-	sections = append(sections, m.renderPlayerPanel())
-	sections = append(sections, "")
-	sections = append(sections, m.renderQueue())
+	sections := []string{
+		m.renderHeader(),
+		m.renderNowPlayingPanel(),
+		"",
+	}
+
+	if m.showQueue {
+		sections = append(sections, m.renderPlaylistPanel())
+	}
+
 	if m.showHelp {
-		sections = append(sections, "")
-		sections = append(sections, m.renderHelp())
+		sections = append(sections, "", m.renderHelpPanel())
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
-func (m Model) renderHeader() string {
-	return titleStyle.Render("🎵 GoPlayer") + "  " +
-		subtitleStyle.Render("— Reproductor de música TUI")
+func (m AppModel) renderHeader() string {
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(pink).
+		MarginLeft(2).
+		MarginTop(1).
+		Render(appName)
+
+	subtitle := lipgloss.NewStyle().
+		Foreground(comment).
+		Render(appSubtitle)
+
+	return title + "  " + subtitle
 }
 
-func (m Model) renderPlayerPanel() string {
-	var b strings.Builder
+func (m AppModel) renderNowPlayingPanel() string {
+	track, hasTrack := m.playlist.Current()
 
-	song, ok := m.queue.Current()
-	if ok {
-		var statusStr string
-		switch m.state {
-		case StatePlaying:
-			statusStr = playingStyle.Render("▶ ") + song.String()
-		case StatePaused:
-			statusStr = pausedStyle.Render("⏸ ") + song.String()
-		default:
-			statusStr = stoppedStyle.Render("⏹ ") + song.String()
-		}
-		b.WriteString(infoStyle.Render(statusStr))
-		b.WriteString("\n")
+	var content strings.Builder
 
-		progressPercent := 0.0
-		if m.duration > 0 {
-			progressPercent = float64(m.elapsed) / float64(m.duration)
-		}
-		bar := m.progress.ViewAs(progressPercent)
-		b.WriteString(infoStyle.Render(bar))
-
-		elapsedStr := formatDuration(m.elapsed)
-		durationStr := song.DurationStr()
-		if m.duration > 0 {
-			durationStr = formatDuration(m.duration)
-		}
-		timeStr := fmt.Sprintf(" %s / %s", elapsedStr, durationStr)
-		b.WriteString(lipgloss.NewStyle().Foreground(colorComment).Render(timeStr))
-		b.WriteString("\n")
-
-		shuffleStr := ""
-		if m.queue.shuffle {
-			shuffleStr = " 🔀"
-		}
-		muteStr := ""
-		if m.volCtrl != nil && m.volCtrl.Silent {
-			muteStr = " 🔇"
-		}
-		info := fmt.Sprintf("Volumen: %.0f%%  %s%s%s",
-			(1.0+m.volLevel/10)*100,
-			m.queue.repeat.String(),
-			shuffleStr,
-			muteStr,
-		)
-		b.WriteString(subtitleStyle.Render(info))
+	if hasTrack {
+		content.WriteString(m.renderStatusLine(track))
+		content.WriteString("\n")
+		content.WriteString(m.renderProgressBar())
+		content.WriteString("\n")
+		content.WriteString(m.renderMetadataLine())
 	} else {
-		b.WriteString(stoppedStyle.Render("⏹ No hay canciones en la cola"))
-		b.WriteString("\n")
-		b.WriteString(subtitleStyle.Render("Coloca archivos .mp3 o .wav en ./music/ o ~/Music/"))
+		content.WriteString(
+			lipgloss.NewStyle().Bold(true).Foreground(red).Render("⏹ Sin canciones"),
+		)
+		content.WriteString("\n")
+		content.WriteString(
+			lipgloss.NewStyle().Foreground(comment).Render(
+				"Coloca archivos .mp3 o .wav en ./music/ o ~/Music/",
+			),
+		)
 	}
 
-	return boxStyle.Render(b.String())
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(purple).
+		Padding(1, 2).
+		MarginLeft(2).
+		MarginRight(2).
+		Render(content.String())
 }
 
-func (m Model) renderQueue() string {
-	if m.queue.Len() == 0 {
-		return subtitleStyle.Render("📂 Cola vacía — Escaneando directorios de música...")
+func (m AppModel) renderStatusLine(track Track) string {
+	icon := m.state.Icon()
+	label := m.state.Label()
+
+	var style lipgloss.Style
+	switch m.state {
+	case StatePlaying:
+		style = lipgloss.NewStyle().Bold(true).Foreground(green)
+	case StatePaused:
+		style = lipgloss.NewStyle().Bold(true).Foreground(yellow)
+	default:
+		style = lipgloss.NewStyle().Bold(true).Foreground(red)
+	}
+
+	return lipgloss.NewStyle().
+		MarginLeft(2).
+		Render(style.Render(icon+" "+label) + "  " + track.DisplayName())
+}
+
+func (m AppModel) renderProgressBar() string {
+	percent := 0.0
+	if m.totalTime > 0 {
+		percent = float64(m.elapsed) / float64(m.totalTime)
+	}
+
+	bar := m.progressBar.ViewAs(percent)
+	timeInfo := fmt.Sprintf(" %s / %s",
+		formatDuration(m.elapsed),
+		formatDuration(m.totalTime),
+	)
+
+	return lipgloss.NewStyle().
+		MarginLeft(2).
+		Render(bar) +
+		lipgloss.NewStyle().
+			Foreground(comment).
+			Render(timeInfo)
+}
+
+func (m AppModel) renderMetadataLine() string {
+	shuffleIcon := ""
+	if m.playlist.shuffle {
+		shuffleIcon = " 🔀"
+	}
+
+	muteIcon := ""
+	if m.audio.IsMuted() {
+		muteIcon = " 🔇"
+	}
+
+	volPercent := int((1.0 + m.volumeLevel/10) * 100)
+	volBar := renderVolumeBar(m.volumeLevel, maxVolume, minVolume)
+
+	info := fmt.Sprintf("%s  %s%s  Vol: %s %d%%%s",
+		m.playlist.repeat.Icon(),
+		m.playlist.repeat.Label(),
+		shuffleIcon,
+		volBar,
+		volPercent,
+		muteIcon,
+	)
+
+	return lipgloss.NewStyle().
+		Foreground(comment).
+		MarginLeft(2).
+		Render(info)
+}
+
+func (m AppModel) renderPlaylistPanel() string {
+	if m.playlist.IsEmpty() {
+		return lipgloss.NewStyle().
+			Foreground(comment).
+			MarginLeft(2).
+			Render("📂 Cola vacía — Escaneando directorios...")
 	}
 
 	var lines []string
+
 	header := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(colorPurple).
-		Render(fmt.Sprintf("📋 Cola de reproducción (%d canciones)", m.queue.Len()))
+		Foreground(purple).
+		MarginLeft(2).
+		Render(fmt.Sprintf("📋 Cola (%d canciones)", m.playlist.Length()))
 	lines = append(lines, header)
 
-	for i, song := range m.queue.songs {
-		prefix := "  "
-		if i == m.queue.current {
-			prefix = "▶ "
-		}
+	visibleStart, visibleEnd := m.calculateVisibleRange(10)
 
-		num := fmt.Sprintf("%2d.", i+1)
-		name := song.String()
-		dur := song.DurationStr()
+	for i := visibleStart; i < visibleEnd; i++ {
+		lines = append(lines, m.renderTrackRow(i))
+	}
 
-		line := fmt.Sprintf("%s%s %-40s %8s", prefix, num, truncate(name, 38), dur)
-
-		if i == m.cursor {
-			line = lipgloss.NewStyle().
-				Background(colorCurrent).
-				Foreground(colorGreen).
-				Bold(true).
-				Render(" > " + line)
-		} else if i == m.queue.current {
-			line = lipgloss.NewStyle().
-				Foreground(colorCyan).
-				Render(line)
-		} else {
-			line = lipgloss.NewStyle().
-				Foreground(colorFg).
-				Render(line)
-		}
-
-		lines = append(lines, line)
+	if m.playlist.Length() > 10 {
+		scrollHint := fmt.Sprintf("... %d más ...", m.playlist.Length()-10)
+		lines = append(lines, lipgloss.NewStyle().Foreground(comment).MarginLeft(4).Render(scrollHint))
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-func (m Model) renderHelp() string {
-	help := [][]string{
+func (m AppModel) renderTrackRow(index int) string {
+	track := m.playlist.tracks[index]
+
+	prefix := "  "
+	if index == m.playlist.current {
+		prefix = "▶ "
+	}
+
+	number := fmt.Sprintf("%2d.", index+1)
+	name := truncate(track.DisplayName(), 36)
+	duration := track.FormattedDuration()
+
+	row := fmt.Sprintf("%s%s %-38s %8s", prefix, number, name, duration)
+
+	switch {
+	case index == m.cursorIndex:
+		return lipgloss.NewStyle().
+			Background(selection).
+			Foreground(green).
+			Bold(true).
+			MarginLeft(2).
+			Render("▸ " + row)
+
+	case index == m.playlist.current:
+		return lipgloss.NewStyle().
+			Foreground(cyan).
+			MarginLeft(2).
+			Render(row)
+
+	default:
+		return lipgloss.NewStyle().
+			Foreground(foreground).
+			MarginLeft(2).
+			Render(row)
+	}
+}
+
+func (m AppModel) calculateVisibleRange(maxVisible int) (int, int) {
+	total := m.playlist.Length()
+	if total <= maxVisible {
+		return 0, total
+	}
+
+	start := m.cursorIndex - maxVisible/2
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxVisible
+	if end > total {
+		end = total
+		start = total - maxVisible
+	}
+	return start, end
+}
+
+func (m AppModel) renderHelpPanel() string {
+	bindings := []struct {
+		key  string
+		desc string
+	}{
 		{"space", "Reproducir / Pausar"},
-		{"n", "Siguiente canción"},
-		{"N", "Canción anterior"},
-		{"↑/↓ o j/k", "Navegar lista"},
+		{"n / N", "Siguiente / Anterior"},
+		{"↑↓ / jk", "Navegar lista"},
 		{"enter", "Reproducir seleccionada"},
 		{"d", "Eliminar de la cola"},
-		{"+ / -", "Subir / Bajar volumen"},
+		{"+ / -", "Volumen"},
 		{"m", "Silenciar"},
 		{"> / <", "Adelantar / Retroceder 10s"},
 		{"0", "Reiniciar canción"},
 		{"r", "Modo repetición"},
-		{"s", "Modo aleatorio"},
-		{"h / ?", "Mostrar / ocultar ayuda"},
+		{"s", "Aleatorio"},
+		{"l", "Mostrar/ocultar cola"},
+		{"h / ?", "Ayuda"},
 		{"q", "Salir"},
 	}
 
 	var lines []string
-	lines = append(lines, lipgloss.NewStyle().Foreground(colorPurple).Bold(true).Render("⌨️  Controles:"))
+	lines = append(lines, lipgloss.NewStyle().
+		Foreground(purple).
+		Bold(true).
+		MarginLeft(2).
+		Render("⌨️  Controles"))
 
-	for _, h := range help {
-		key := helpKeyStyle.Render(fmt.Sprintf("%-12s", h[0]))
-		desc := helpDescStyle.Render(h[1])
-		lines = append(lines, "  "+key+" "+desc)
+	for _, b := range bindings {
+		key := lipgloss.NewStyle().
+			Foreground(cyan).
+			Bold(true).
+			Width(12).
+			Render(b.key)
+		desc := lipgloss.NewStyle().
+			Foreground(comment).
+			Render(b.desc)
+		lines = append(lines, lipgloss.NewStyle().MarginLeft(4).Render(key+" "+desc))
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  UTILIDADES
-// ═══════════════════════════════════════════════════════════════
+func (m AppModel) renderErrorScreen() string {
+	msg := lipgloss.NewStyle().
+		Foreground(red).
+		Bold(true).
+		MarginLeft(2).
+		Render("✖ Error: " + m.lastError.Error())
+
+	hint := lipgloss.NewStyle().
+		Foreground(comment).
+		MarginLeft(2).
+		Render("Presiona 'q' para salir.")
+
+	return "\n" + msg + "\n\n" + hint
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// UTILIDADES[cite: 1]
+// ═══════════════════════════════════════════════════════════════════════════════
 
 func formatDuration(d time.Duration) string {
 	if d < 0 {
 		d = 0
 	}
 	d = d.Round(time.Second)
-	m := int(d.Minutes())
-	s := int(d.Seconds()) % 60
-	return fmt.Sprintf("%d:%02d", m, s)
+	minutes := int(d.Minutes())
+	seconds := int(d.Seconds()) % 60
+	return fmt.Sprintf("%d:%02d", minutes, seconds)
 }
 
-func truncate(s string, max int) string {
-	if len(s) <= max {
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
 		return s
 	}
-	if max <= 3 {
-		return s[:max]
+	if maxLen <= 3 {
+		return s[:maxLen]
 	}
-	return s[:max-3] + "..."
+	return s[:maxLen-3] + "..."
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MAIN
-// ═══════════════════════════════════════════════════════════════
+func clampDuration(value, min, max time.Duration) time.Duration {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+func renderVolumeBar(current, max, min float64) string {
+	const bars = 10
+	rangeSize := max - min
+	if rangeSize == 0 {
+		return strings.Repeat("░", bars)
+	}
+
+	normalized := (current - min) / rangeSize
+	filled := int(normalized * bars)
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > bars {
+		filled = bars
+	}
+
+	return lipgloss.NewStyle().Foreground(cyan).Render(strings.Repeat("█", filled)) +
+		lipgloss.NewStyle().Foreground(comment).Render(strings.Repeat("░", bars-filled))
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PUNTO DE ENTRADA[cite: 1]
+// ═══════════════════════════════════════════════════════════════════════════════
 
 func main() {
-	m := NewModel()
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	model := NewAppModel()
+	program := tea.NewProgram(model, tea.WithAltScreen())
 
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error al iniciar: %v\n", err)
+	if _, err := program.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error al iniciar GoPlayer: %v\n", err)
 		os.Exit(1)
 	}
 }
