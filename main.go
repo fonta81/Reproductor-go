@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,13 +23,13 @@ import (
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const (
-	appName         = "🎵 GoPlayer"
+	appName         = "󰎆 GoPlayer"
 	appSubtitle     = "Reproductor de música TUI"
 	defaultDir      = "./music"
 	seekSeconds     = 10
 	volumeStep      = 0.5
-	maxVolume       = 5.0
-	minVolume       = -5.0
+	maxVolume       = 0.0   // 0.0 = 100% amplitud original (Sin distorsión)
+	minVolume       = -10.0 // Límite inferior absoluto
 	progressWidth   = 50
 	defaultDuration = 3 * time.Minute // fallback cuando no hay metadata
 
@@ -92,11 +93,11 @@ const (
 func (s PlaybackState) Icon() string {
 	switch s {
 	case StatePlaying:
-		return "▶"
+		return "󰐊"
 	case StatePaused:
-		return "⏸"
+		return "󰏤"
 	default:
-		return "⏹"
+		return "󰓛"
 	}
 }
 
@@ -122,11 +123,11 @@ const (
 func (r RepeatMode) Icon() string {
 	switch r {
 	case RepeatOne:
-		return "🔂"
+		return "󰑣"
 	case RepeatAll:
-		return "🔁"
+		return "󰑘"
 	default:
-		return "➡"
+		return "󰑶"
 	}
 }
 
@@ -213,6 +214,20 @@ func (p *Playlist) Current() (Track, bool) {
 func (p *Playlist) Next() (Track, bool) {
 	if len(p.tracks) == 0 {
 		return Track{}, false
+	}
+
+	if p.shuffle {
+		if len(p.tracks) <= 1 {
+			return p.tracks[p.current], true
+		}
+
+		nextIndex := p.current
+		for nextIndex == p.current {
+			nextIndex = rand.Intn(len(p.tracks))
+		}
+
+		p.current = nextIndex
+		return p.tracks[p.current], true
 	}
 
 	switch p.repeat {
@@ -305,10 +320,8 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 		}
 	}
 
-	// Calcular duración exacta
 	realDuration := format.SampleRate.D(streamer.Len())
 
-	// Inicializar speaker una sola vez con la tasa de muestreo ESTÁNDAR
 	if !ae.isInit {
 		speaker.Init(standardSampleRate, standardSampleRate.N(time.Second/10))
 		ae.isInit = true
@@ -317,7 +330,6 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	ae.streamer = streamer
 	ae.format = format
 
-	// Remuestrear el audio original a nuestra tasa estándar
 	resampled := beep.Resample(4, format.SampleRate, standardSampleRate, streamer)
 
 	ae.ctrl = &beep.Ctrl{Streamer: resampled}
@@ -370,7 +382,6 @@ func (ae *AudioEngine) IsMuted() bool {
 	return ae.volume != nil && ae.volume.Silent
 }
 
-// Obtener la posición real del stream de audio
 func (ae *AudioEngine) Position() time.Duration {
 	if ae.streamer != nil {
 		return ae.format.SampleRate.D(ae.streamer.Position())
@@ -475,7 +486,6 @@ func (m AppModel) Init() tea.Cmd {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func (m AppModel) tick() tea.Cmd {
-	// Ticks más rápidos para una barra fluida
 	return tea.Tick(time.Millisecond*250, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
@@ -881,7 +891,7 @@ func (m AppModel) renderNowPlayingPanel() string {
 		content.WriteString(m.renderMetadataLine())
 	} else {
 		content.WriteString(
-			lipgloss.NewStyle().Bold(true).Foreground(red).Render("⏹ Sin canciones"),
+			lipgloss.NewStyle().Bold(true).Foreground(red).Render("󰓛 Sin canciones"),
 		)
 		content.WriteString("\n")
 		content.WriteString(
@@ -939,10 +949,16 @@ func (m AppModel) renderProgressBar() string {
 func (m AppModel) renderMetadataLine() string {
 	volDisplay := ""
 	if m.audio.IsMuted() {
-		volDisplay = lipgloss.NewStyle().Foreground(red).Render("Vol: Mut")
+		volDisplay = lipgloss.NewStyle().Foreground(red).Render("󰝟 Mut")
 	} else {
 		pct := int((m.volumeLevel - minVolume) / (maxVolume - minVolume) * 100)
-		volDisplay = fmt.Sprintf("Vol: %d%%", pct)
+		volIcon := "󰕾"
+		if pct < 30 {
+			volIcon = "󰕿"
+		} else if pct < 70 {
+			volIcon = "󰖀"
+		}
+		volDisplay = fmt.Sprintf("%s %d%%", volIcon, pct)
 	}
 
 	queueDisplay := fmt.Sprintf("%d/%d", m.playlist.current+1, m.playlist.Length())
@@ -952,15 +968,15 @@ func (m AppModel) renderMetadataLine() string {
 
 	metaStyle := lipgloss.NewStyle().Foreground(comment).MarginLeft(2)
 
-	shuffleIcon := " "
+	shuffleIcon := " 󰒑 "
 	if m.playlist.shuffle {
-		shuffleIcon = " 🔀 "
+		shuffleIcon = " 󰒎 "
 	}
 
 	repeatIcon := " " + m.playlist.repeat.Icon() + " "
 
 	return metaStyle.Render(
-		fmt.Sprintf("🔊 %s  |  📋 %s  |%s|%s",
+		fmt.Sprintf("%s  |  󰲸 %s  |%s|%s",
 			volDisplay,
 			queueDisplay,
 			shuffleIcon,
@@ -995,7 +1011,7 @@ func (m AppModel) renderPlaylistPanel() string {
 
 		cursor := "  "
 		if i == m.cursorIndex {
-			cursor = "▶ "
+			cursor = "󰐊 "
 		}
 
 		style := lipgloss.NewStyle()
