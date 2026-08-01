@@ -4,30 +4,17 @@ GOPLAYER - TERMINAL USER INTERFACE (TUI) MUSIC PLAYER
 ================================================================================
 
 PURPOSE & ARCHITECTURE:
-This program is a fully functional music player built for the terminal. It uses
-The Elm Architecture (Model-View-Update or MVU) implemented via the Bubble Tea framework.
+This program is a fully functional music player built for the terminal[cite: 2]. It uses
+The Elm Architecture (Model-View-Update or MVU) implemented via the Bubble Tea framework[cite: 2].
 The architecture strictly separates state (Model), logic/events (Update), and
-rendering (View).
-
-BASIC FLOW:
-1. Init(): Fires off initial commands (scanning the library, starting the UI tick timer).
-2. Update(): Listens for messages (tea.Msg) such as keystrokes, tick events, or audio
-   state changes. It returns an updated Model and potentially new commands (tea.Cmd).
-3. View(): Takes the current Model and purely renders it to a string using Lipgloss,
-   which is then painted to the terminal.
-
-KEY EXTERNAL LIBRARIES:
-- github.com/charmbracelet/bubbletea: The core TUI framework (MVU architecture).
-- github.com/charmbracelet/bubbles: Pre-built TUI components (used here for the progress bar).
-- github.com/charmbracelet/lipgloss: A styling library that acts like CSS for the
-  terminal (colors, margins, borders, layouts).
-- github.com/faiface/beep: The core audio engine used to decode and play .mp3/.wav files.
+rendering (View)[cite: 2].
 ================================================================================
 */
 
 package main
 
 import (
+	"flag"
 	"fmt"
 	"math"
 	"math/rand"
@@ -37,6 +24,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/faiface/beep"
@@ -53,19 +41,14 @@ import (
 const (
 	appName         = "GoPlayer"
 	appSubtitle     = "Reproductor de música TUI"
-	defaultDir      = "./music" // Default directory to scan for music files
-	seekSeconds     = 10        // Number of seconds to jump forward/backward
+	defaultDir      = "./music" // Default directory to scan for music files[cite: 2]
+	seekSeconds     = 10        // Number of seconds to jump forward/backward[cite: 2]
 	progressWidth   = 50
-	defaultDuration = 3 * time.Minute // Fallback duration if metadata is missing
+	defaultDuration = 3 * time.Minute // Fallback duration if metadata is missing[cite: 2]
 
-	// standardSampleRate sets a fixed playback frequency.
-	// Resampling all audio to this rate prevents playback speed issues (Chipmunk/Darth Vader effects)
-	// when playing tracks with varying original sample rates.
-	standardSampleRate = beep.SampleRate(44100)
+	standardSampleRate = beep.SampleRate(44100) //[cite: 2]
 )
 
-// ── Nerd Font Icons (Material Design) ────────────────────────────────────────
-// These require a patched Nerd Font installed in the user's terminal to render correctly.
 const (
 	iconPlay      = "󰐊"
 	iconPause     = "󰏤"
@@ -84,17 +67,15 @@ const (
 	iconNav       = "󰍉"
 	iconAudio     = "󰕾"
 	iconSystem    = "󰒓"
+	iconFolder    = "󰉋"
 )
 
-// ── Volume Control ───────────────────────────────────────────────────────────
 const (
-	volumeStep = 3.0   // 3 dB step represents a clearly perceptible change in volume.
-	maxVolume  = 0.0   // 0 dBFS is the maximum digital volume before clipping occurs.
-	minVolume  = -30.0 // -30 dB is considered the volume floor (virtually silent).
+	volumeStep = 3.0   // 3 dB step represents a clearly perceptible change in volume[cite: 2].
+	maxVolume  = 0.0   // 0 dBFS is the maximum digital volume before clipping occurs[cite: 2].
+	minVolume  = -30.0 // -30 dB is considered the volume floor (virtually silent)[cite: 2].
 )
 
-// Lipgloss Color Palette: Dracula Theme
-// Lipgloss allows defining reusable, CSS-like styles for terminal rendering.
 var (
 	pink       = lipgloss.Color("#FF79C6")
 	cyan       = lipgloss.Color("#8BE9FD")
@@ -108,7 +89,6 @@ var (
 	selection  = lipgloss.Color("#44475A")
 	background = lipgloss.Color("#282A36")
 
-	// Pre-compiled Lipgloss styles for the Help Menu to save on render performance.
 	helpContainerStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(selection).
@@ -139,7 +119,6 @@ var (
 // DOMAIN: DATA MODELS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// PlaybackState defines the current transport state of the audio engine.
 type PlaybackState int
 
 const (
@@ -189,14 +168,13 @@ func (r RepeatMode) Icon() string {
 	}
 }
 
-// Track represents a single audio file and its metadata.
 type Track struct {
 	ID       string
 	Title    string
 	Artist   string
 	Album    string
 	Duration time.Duration
-	Path     string // Absolute or relative path to the physical audio file
+	Path     string // Absolute or relative path to the physical audio file[cite: 2]
 }
 
 func (t Track) DisplayName() string {
@@ -217,17 +195,14 @@ func (t Track) FormattedDuration() string {
 // DOMAIN: PLAYLIST MANAGEMENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Playlist manages the queue of tracks.
-// Note on Idiomatic Go: Pointer receivers (e.g., `func (p *Playlist)`) are used here
-// because these methods mutate the playlist's internal state (tracks, indices).
 type Playlist struct {
 	tracks          []Track
-	current         int // Index of the currently playing track in the tracks slice
+	current         int
 	shuffle         bool
 	repeat          RepeatMode
-	shuffleOrder    []int // A randomized permutation of track indices for the shuffle state
-	shuffleIdx      int   // Current position navigating through the shuffleOrder slice
-	shuffleStartIdx int   // Remembers where the shuffle cycle began to detect when a full loop finishes
+	shuffleOrder    []int
+	shuffleIdx      int
+	shuffleStartIdx int
 }
 
 func NewPlaylist() *Playlist {
@@ -252,7 +227,6 @@ func (p *Playlist) Remove(index int) {
 		return
 	}
 
-	// Idiomatic Go slice removal: append elements before index with elements after index.
 	p.tracks = append(p.tracks[:index], p.tracks[index+1:]...)
 
 	if p.shuffle {
@@ -271,7 +245,14 @@ func (p *Playlist) Remove(index int) {
 	}
 }
 
-// Current returns the active track. The boolean indicates if a track actually exists.
+func (p *Playlist) Clear() {
+	p.tracks = make([]Track, 0)
+	p.current = -1
+	p.shuffleOrder = nil
+	p.shuffleIdx = 0
+	p.shuffleStartIdx = 0
+}
+
 func (p *Playlist) Current() (Track, bool) {
 	if !p.isValidIndex(p.current) {
 		return Track{}, false
@@ -279,7 +260,6 @@ func (p *Playlist) Current() (Track, bool) {
 	return p.tracks[p.current], true
 }
 
-// Next calculates and returns the next track to play based on shuffle and repeat rules.
 func (p *Playlist) Next() (Track, bool) {
 	if len(p.tracks) == 0 {
 		return Track{}, false
@@ -299,7 +279,6 @@ func (p *Playlist) Next() (Track, bool) {
 
 		nextIdx := (p.shuffleIdx + 1) % len(p.shuffleOrder)
 
-		// Stop if we completed a randomized cycle and repeat is off
 		if p.repeat == RepeatOff && nextIdx == p.shuffleStartIdx {
 			return Track{}, false
 		}
@@ -392,10 +371,6 @@ func (p *Playlist) isValidIndex(index int) bool {
 	return index >= 0 && index < len(p.tracks)
 }
 
-// ── Shuffle Internals ────────────────────────────────────────────────────────
-
-// regenerateShuffle uses the Fisher-Yates algorithm for unbiased, true-random shuffling.
-// It shuffles indices rather than tracks to preserve the original playlist sequence.
 func (p *Playlist) regenerateShuffle() {
 	n := len(p.tracks)
 	if n == 0 {
@@ -407,7 +382,6 @@ func (p *Playlist) regenerateShuffle() {
 		p.shuffleOrder[i] = i
 	}
 
-	// Fisher-Yates shuffle
 	for i := n - 1; i > 0; i-- {
 		j := rand.Intn(i + 1)
 		p.shuffleOrder[i], p.shuffleOrder[j] = p.shuffleOrder[j], p.shuffleOrder[i]
@@ -444,8 +418,6 @@ func (p *Playlist) findInShuffleOrder(trackIndex int) int {
 // INFRASTRUCTURE: AUDIO ENGINE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Limiter acts as a hard limiter, preventing audio samples from exceeding [-1.0, 1.0]
-// to prevent digital distortion (clipping). Beep processes audio in float64 ranges.
 type Limiter struct {
 	Streamer beep.Streamer
 }
@@ -453,7 +425,7 @@ type Limiter struct {
 func (l *Limiter) Stream(samples [][2]float64) (n int, ok bool) {
 	n, ok = l.Streamer.Stream(samples)
 	for i := range samples[:n] {
-		for ch := 0; ch < 2; ch++ { // Left and Right channels
+		for ch := 0; ch < 2; ch++ { // Left and Right channels[cite: 2]
 			if samples[i][ch] > 1.0 {
 				samples[i][ch] = 1.0
 			} else if samples[i][ch] < -1.0 {
@@ -471,24 +443,22 @@ func (l *Limiter) Err() error {
 	return nil
 }
 
-// AudioEngine wraps the beep library components to manage playback, volume, and lifecycle.
 type AudioEngine struct {
-	streamer   beep.StreamSeekCloser // The decoded audio stream
-	ctrl       *beep.Ctrl            // Controls pausing/resuming
-	volume     *effects.Volume       // Controls gain (decibels)
-	format     beep.Format           // Sample rate and channel info of the loaded file
-	isInit     bool                  // Tracks if the OS speaker is initialized
-	sessionID  int                   // Used to invalidate obsolete playbackEndedMsg events
-	cancelChan chan struct{}         // Idiomatic Go channel for signaling goroutine cancellation
+	streamer   beep.StreamSeekCloser
+	ctrl       *beep.Ctrl
+	volume     *effects.Volume
+	format     beep.Format
+	isInit     bool
+	sessionID  int
+	cancelChan chan struct{}
 }
 
 func NewAudioEngine() *AudioEngine {
 	return &AudioEngine{}
 }
 
-// Load decodes audio files based on explicit extension checking for efficiency.
 func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
-	ae.Stop() // Stop any current playback
+	ae.Stop()
 
 	file, err := os.Open(track.Path)
 	if err != nil {
@@ -510,14 +480,12 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	}
 
 	if err != nil {
-		file.Close() // Ensure proper resource cleanup on failure
+		file.Close()
 		return 0, fmt.Errorf("error al decodificar %s: %w", track.Path, err)
 	}
 
-	// Calculate absolute duration based on sample rate and total samples
 	realDuration := format.SampleRate.D(streamer.Len())
 
-	// Initialize speaker only once using the predefined standard rate
 	if !ae.isInit {
 		speaker.Init(standardSampleRate, standardSampleRate.N(time.Second/10))
 		ae.isInit = true
@@ -526,30 +494,23 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	ae.streamer = streamer
 	ae.format = format
 
-	// Resample the audio file to standardSampleRate so it plays at the correct speed
 	resampled := beep.Resample(4, format.SampleRate, standardSampleRate, streamer)
 
-	// Wrap the streamer in control wrappers: Ctrl (pause) -> Volume -> Streamer
 	ae.ctrl = &beep.Ctrl{Streamer: resampled}
 	ae.volume = &effects.Volume{
 		Streamer: ae.ctrl,
-		Base:     math.Pow(10, 1.0/20.0), // Setup logarithmic volume control
-		Volume:   0,                      // 0 = no gain, max clean volume
+		Base:     math.Pow(10, 1.0/20.0), // Setup logarithmic volume control[cite: 2]
+		Volume:   0,
 		Silent:   false,
 	}
 
 	return realDuration, nil
 }
 
-// Play starts playback in a separate goroutine handled by `speaker.Play`.
-// It returns a `chan struct{}` which is an idiomatic zero-memory channel used
-// strictly as a signaling mechanism (to notify when the track finishes).
 func (ae *AudioEngine) Play() chan struct{} {
 	done := make(chan struct{})
 	limiter := &Limiter{Streamer: ae.volume}
 
-	// beep.Seq chains streamers. Here, it plays the song, then executes the Callback
-	// which closes the `done` channel, notifying the main app that the song ended.
 	speaker.Play(beep.Seq(limiter, beep.Callback(func() {
 		close(done)
 	})))
@@ -557,14 +518,14 @@ func (ae *AudioEngine) Play() chan struct{} {
 }
 
 func (ae *AudioEngine) Stop() {
-	speaker.Clear() // Immediately stops the OS audio output
+	speaker.Clear()
 
 	if ae.cancelChan != nil {
-		close(ae.cancelChan) // Signal any waiting Bubble Tea commands to abort
+		close(ae.cancelChan)
 		ae.cancelChan = nil
 	}
 	if ae.streamer != nil {
-		ae.streamer.Close() // Release file handles
+		ae.streamer.Close()
 		ae.streamer = nil
 	}
 	ae.ctrl = nil
@@ -604,7 +565,6 @@ func (ae *AudioEngine) Seek(position time.Duration) error {
 		return fmt.Errorf("formato no permite seek")
 	}
 
-	// Convert requested time to exact number of samples
 	samples := int(position.Seconds()) * int(ae.format.SampleRate)
 	if err := seeker.Seek(samples); err != nil {
 		return fmt.Errorf("seek fallido: %w", err)
@@ -623,30 +583,20 @@ func (ae *AudioEngine) Close() {
 // APPLICATION: UI MODEL (Bubble Tea)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ── Messages (tea.Msg) ───────────────────────────────────────────────────────
-// Messages are discrete events that flow into the Update() function. They decouple
-// the action's occurrence from the state mutation.
 type (
-	// trackLoadedMsg triggers after an audio file is successfully decoded and ready
 	trackLoadedMsg struct {
 		track    Track
 		duration time.Duration
 	}
-	// playbackEndedMsg triggers when an audio stream hits EOF
-	playbackEndedMsg struct{ sessionID int }
-	// tickMsg triggers periodically to update the progress bar and timers
-	tickMsg time.Time
-	// libraryScannedMsg returns a slice of tracks found on the hard drive
-	libraryScannedMsg struct{ tracks []Track }
-	// errorMsg encapsulates fatal application errors for display
+	playbackEndedMsg  struct{ sessionID int }
+	tickMsg           time.Time
+	libraryScannedMsg struct {
+		tracks []Track
+		dir    string
+	}
 	errorMsg struct{ err error }
 )
 
-// AppModel holds the entire global state of the application.
-// In Bubble Tea, the main model is usually passed by value to the Update and View functions.
-// Note: `playlist` and `audio` are pointers. This is a pragmatic design choice: while `AppModel`
-// is copied by value, it shares the underlying heavy structures (buffers, hardware handles)
-// without copying them.
 type AppModel struct {
 	playlist *Playlist
 	audio    *AudioEngine
@@ -654,22 +604,31 @@ type AppModel struct {
 	state       PlaybackState
 	elapsed     time.Duration
 	totalTime   time.Duration
-	cursorIndex int // Highlights a track in the UI queue without playing it
+	cursorIndex int
 	volumeLevel float64
 	lastError   error
 
 	width       int
 	height      int
-	progressBar progress.Model // A pre-built TUI component from charmbracelet/bubbles
+	progressBar progress.Model
 	showHelp    bool
 	showQueue   bool
+
+	// Dynamic directory loading features
+	musicDir     string
+	pathInput    textinput.Model
+	isTypingPath bool
 }
 
-// NewAppModel initializes the default state.
-func NewAppModel() AppModel {
+func NewAppModel(initialDir string) AppModel {
 	bar := progress.New(progress.WithDefaultGradient())
 	bar.Width = progressWidth
 	bar.ShowPercentage = false
+
+	ti := textinput.New()
+	ti.Placeholder = "Ruta de la carpeta (ej. /home/user/Music o ./music)"
+	ti.CharLimit = 256
+	ti.Width = 60
 
 	return AppModel{
 		playlist:    NewPlaylist(),
@@ -679,40 +638,40 @@ func NewAppModel() AppModel {
 		volumeLevel: 0,
 		showHelp:    true,
 		showQueue:   true,
+		musicDir:    initialDir,
+		pathInput:   ti,
 	}
 }
 
-// ── 1. Init(): The Startup Function ──────────────────────────────────────────
-// Init is called once when Bubble Tea starts. It returns an initial tea.Cmd to execute.
-// tea.Batch runs multiple commands concurrently.
 func (m AppModel) Init() tea.Cmd {
-	return tea.Batch(m.scanLibrary(), m.tick())
+	return tea.Batch(textinput.Blink, m.scanLibraryCmd(m.musicDir), m.tick())
 }
 
-// Commands (tea.Cmd): Functions that perform side effects (I/O, timers, decoding)
-// asynchronously and return a tea.Msg when finished, which is fed back into Update().
-
-// tick returns a command that waits 250ms, then emits a tickMsg.
 func (m AppModel) tick() tea.Cmd {
 	return tea.Tick(time.Millisecond*250, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
 
-// scanLibrary performs file I/O to find audio files. It returns a libraryScannedMsg.
-func (m AppModel) scanLibrary() tea.Cmd {
+// scanLibraryCmd handles both default fallback scanning and explicit directory targeting.
+func (m AppModel) scanLibraryCmd(targetDir string) tea.Cmd {
 	return func() tea.Msg {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			home = ""
+		var dirs []string
+
+		// Fallback scanning logic if no explicit directory was specified[cite: 2]
+		if targetDir == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				home = ""
+			}
+			dirs = []string{defaultDir, "./songs"}
+			if home != "" {
+				dirs = append(dirs, filepath.Join(home, "Music"), filepath.Join(home, "Música"))
+			}
+		} else {
+			dirs = []string{targetDir}
 		}
 
-		dirs := []string{defaultDir, "./songs"}
-		if home != "" {
-			dirs = append(dirs, filepath.Join(home, "Music"), filepath.Join(home, "Música"))
-		}
-
-		// Pre-allocate slice to reduce memory allocations during scanning loop.
 		found := make([]Track, 0, 50)
 		for _, dir := range dirs {
 			if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -722,6 +681,11 @@ func (m AppModel) scanLibrary() tea.Cmd {
 			entries, err := os.ReadDir(dir)
 			if err != nil {
 				continue
+			}
+
+			// If successfully resolved a directory in fallback mode, register it as the target
+			if targetDir == "" {
+				targetDir = dir
 			}
 
 			for _, entry := range entries {
@@ -741,12 +705,21 @@ func (m AppModel) scanLibrary() tea.Cmd {
 					Path:   filepath.Join(dir, entry.Name()),
 				})
 			}
+
+			// Stop searching other fallback directories if we successfully found files in one
+			if len(found) > 0 {
+				break
+			}
 		}
-		return libraryScannedMsg{tracks: found}
+
+		if len(found) == 0 {
+			return errorMsg{fmt.Errorf("no se encontraron archivos de audio en: %s", targetDir)}
+		}
+
+		return libraryScannedMsg{tracks: found, dir: targetDir}
 	}
 }
 
-// loadTrackCmd attempts to decode a file via the audio engine. Returns trackLoadedMsg on success.
 func (m AppModel) loadTrackCmd(track Track) tea.Cmd {
 	return func() tea.Msg {
 		duration, err := m.audio.Load(track)
@@ -762,57 +735,58 @@ func (m AppModel) loadTrackCmd(track Track) tea.Cmd {
 // APPLICATION: STATE UPDATE (Update)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ── 2. Update(msg tea.Msg): The Event Loop ───────────────────────────────────
-// This function handles the message-driven architecture. It receives messages,
-// modifies the state (Model), and returns the new Model along with any subsequent Commands.
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Idiomatic Go type assertion switch to handle different events dynamically.
 	switch msg := msg.(type) {
-
-	// Handles terminal window resizing
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		// Dynamically adjust the progress bar based on terminal width.
 		m.progressBar.Width = int(math.Max(float64(msg.Width)*0.7, 30))
 		return m, nil
 
-	// Handles keyboard input
 	case tea.KeyMsg:
+		// Divert keystrokes to the text input component when in typing mode
+		if m.isTypingPath {
+			return m.handlePathInput(msg)
+		}
 		return m.handleKeyInput(msg)
 
-	// Initial library payload injection
 	case libraryScannedMsg:
+		// Reset the player state for the new directory
+		m.playlist.Clear()
+		m.resetPlayback()
+		m.musicDir = msg.dir
+		m.cursorIndex = 0
+
 		for _, track := range msg.tracks {
 			m.playlist.Add(track)
 		}
 		if !m.playlist.IsEmpty() && m.state == StateStopped {
 			m.playlist.current = 0
 		}
-		return m, nil // Returning nil command means we just update UI state
+		return m, nil
 
-	// Proceed with playing a successfully loaded track
 	case trackLoadedMsg:
 		return m.handleTrackLoaded(msg)
 
-	// The heartbeat timer for UI updates
 	case tickMsg:
 		if m.state == StatePlaying {
-			m.elapsed = m.audio.Position() // Fetch exact hardware position
+			m.elapsed = m.audio.Position()
 			if m.elapsed > m.totalTime {
-				m.elapsed = m.totalTime // Prevent UI overflow
+				m.elapsed = m.totalTime
 			}
-			return m, m.tick() // Dispatch another timer command to keep the loop alive
+			return m, m.tick()
+		}
+		// Input cursor blinking needs to be processed
+		if m.isTypingPath {
+			var cmd tea.Cmd
+			m.pathInput, cmd = m.pathInput.Update(msg)
+			return m, tea.Batch(m.tick(), cmd)
 		}
 		return m, nil
 
-	// Triggered when the audio file finishes naturally
 	case playbackEndedMsg:
-		// Stale event prevention: Ignore if the user manually changed tracks
-		// before this event fired, determined by matching sessionIDs.
 		if msg.sessionID != m.audio.sessionID {
 			return m, nil
 		}
-		// If playlist finished and no repeat
 		if m.playlist.isLast() && m.playlist.repeat == RepeatOff {
 			m.state, m.elapsed = StateStopped, 0
 			m.audio.Stop()
@@ -820,9 +794,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.playNext()
 
-	// Handle errors, display briefly, then attempt to recover
 	case errorMsg:
-		m.lastError, m.state = msg.err, StateStopped
+		m.lastError = msg.err
 		// Clear the error message after 5 seconds via a delayed command
 		return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return errorMsg{nil} })
 	default:
@@ -830,12 +803,38 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// Router for user key presses
+func (m AppModel) handlePathInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		// Cancel input
+		m.isTypingPath = false
+		m.pathInput.Blur()
+		return m, nil
+	case "enter":
+		// Submit input
+		newPath := m.pathInput.Value()
+		m.isTypingPath = false
+		m.pathInput.Blur()
+		m.pathInput.SetValue("")
+		if newPath != "" {
+			return m, m.scanLibraryCmd(newPath)
+		}
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.pathInput, cmd = m.pathInput.Update(msg)
+	return m, cmd
+}
+
 func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		m.audio.Close()
-		return m, tea.Quit // Special core command to terminate the application gracefully
+		return m, tea.Quit
+	case "f":
+		m.isTypingPath = true
+		m.pathInput.Focus()
+		return m, textinput.Blink
 	case " ":
 		return m.togglePlayback()
 	case "n":
@@ -844,7 +843,7 @@ func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.playPrevious()
 	case "enter":
 		return m.playSelected()
-	case "up", "k": // vim motions for navigation
+	case "up", "k":
 		m.moveCursor(-1)
 	case "down", "j":
 		m.moveCursor(1)
@@ -875,11 +874,10 @@ func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) handleTrackLoaded(msg trackLoadedMsg) (tea.Model, tea.Cmd) {
-	m.audio.sessionID++ // Increment to invalidate previous session's events
+	m.audio.sessionID++
 	sessionID := m.audio.sessionID
 	m.audio.cancelChan = make(chan struct{})
 
-	// Starts playback hardware side, returns a channel that signals EOF
 	done := m.audio.Play()
 	m.state = StatePlaying
 	m.totalTime = msg.duration
@@ -890,17 +888,14 @@ func (m AppModel) handleTrackLoaded(msg trackLoadedMsg) (tea.Model, tea.Cmd) {
 	m.playlist.tracks[m.playlist.current].Duration = msg.duration
 	m.elapsed = 0
 
-	// waitCmd blocks in a background goroutine (managed by TEA) until playback ends
-	// or the track is skipped/cancelled.
 	waitCmd := func() tea.Msg {
 		select {
-		case <-done: // EOF reached
+		case <-done:
 			return playbackEndedMsg{sessionID: sessionID}
-		case <-m.audio.cancelChan: // User skipped the track; abort this tracker
+		case <-m.audio.cancelChan:
 			return nil
 		}
 	}
-	// Return the timer tick AND the background tracker simultaneously
 	return m, tea.Batch(m.tick(), waitCmd)
 }
 
@@ -914,7 +909,7 @@ func (m AppModel) togglePlayback() (tea.Model, tea.Cmd) {
 		m.audio.ctrl.Paused, m.state = true, StatePaused
 	case StatePaused:
 		m.audio.ctrl.Paused, m.state = false, StatePlaying
-		return m, m.tick() // Restart the UI tick timer upon resume
+		return m, m.tick()
 	case StateStopped:
 		return m.playCurrent()
 	}
@@ -938,7 +933,6 @@ func (m AppModel) playNext() (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) playPrevious() (tea.Model, tea.Cmd) {
-	// Standard player UX: If past 3 seconds, previous simply restarts the track.
 	if m.elapsed > 3*time.Second {
 		m.seekTo(0)
 		return m, nil
@@ -1009,22 +1003,22 @@ func (m *AppModel) resetPlayback() {
 // APPLICATION: RENDER LOOP (View)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ── 3. View(): The Rendering Pipeline ────────────────────────────────────────
-// The View function returns a single string representing the entire terminal interface.
-// State variables dictate what gets concatenated here.
-// Lipgloss is heavily used to compose layouts (e.g., JoinVertical) and apply styles.
 func (m AppModel) View() string {
 	if m.lastError != nil {
 		return m.renderErrorScreen()
 	}
 
-	// We gather "blocks" of UI components and join them vertically
 	sections := []string{m.renderHeader(), m.renderNowPlayingPanel(), ""}
-	if m.showQueue {
-		sections = append(sections, m.renderPlaylistPanel())
-	}
-	if m.showHelp {
-		sections = append(sections, "", m.renderHelpPanel())
+
+	if m.isTypingPath {
+		sections = append(sections, m.renderInputPanel())
+	} else {
+		if m.showQueue {
+			sections = append(sections, m.renderPlaylistPanel())
+		}
+		if m.showHelp {
+			sections = append(sections, "", m.renderHelpPanel())
+		}
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
@@ -1037,17 +1031,18 @@ func (m AppModel) renderHeader() string {
 
 func (m AppModel) renderNowPlayingPanel() string {
 	track, hasTrack := m.playlist.Current()
-	var content strings.Builder // High-performance string concatenation in Go
+	var content strings.Builder
 
 	if hasTrack {
 		content.WriteString(m.renderStatusLine(track) + "\n" + m.renderProgressBar() + "\n" + m.renderMetadataLine())
 	} else {
 		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(red).Render(iconStop + " Sin canciones\n"))
-		content.WriteString(lipgloss.NewStyle().Foreground(comment).Render("Coloca archivos .mp3 o .wav en ./music/ o ~/Music/"))
+		content.WriteString(lipgloss.NewStyle().Foreground(comment).Render("Coloca archivos .mp3 o .wav en el directorio o presiona 'f' para cambiar."))
 	}
 
-	// Box styling wrap
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(purple).Padding(1, 2).Margin(0, 2).Render(content.String())
+	dirDisplay := lipgloss.NewStyle().Foreground(comment).MarginLeft(2).MarginTop(1).Render(iconFolder + " Directorio: " + m.musicDir)
+
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(purple).Padding(1, 2).Margin(0, 2).Render(content.String()) + "\n" + dirDisplay
 }
 
 func (m AppModel) renderStatusLine(track Track) string {
@@ -1071,7 +1066,6 @@ func (m AppModel) renderProgressBar() string {
 		percent = float64(m.elapsed) / float64(m.totalTime)
 	}
 
-	// Ask the pre-built Bubbles component to render itself based on the percentage
 	bar := m.progressBar.ViewAs(percent)
 	timeInfo := fmt.Sprintf(" %s / %s", formatDuration(m.elapsed), formatDuration(m.totalTime))
 	return lipgloss.NewStyle().MarginLeft(2).Render(bar) + lipgloss.NewStyle().Foreground(cyan).Render(timeInfo)
@@ -1102,7 +1096,6 @@ func (m AppModel) renderPlaylistPanel() string {
 	var builder strings.Builder
 	builder.WriteString(lipgloss.NewStyle().Bold(true).Foreground(orange).Render("  " + iconQueue + " Próximamente:\n"))
 
-	// Calculation to keep the visible UI window focused around the cursor (pagination)
 	start := int(math.Max(0, float64(m.cursorIndex-3)))
 	end := int(math.Min(float64(m.playlist.Length()), float64(start+7)))
 
@@ -1114,7 +1107,7 @@ func (m AppModel) renderPlaylistPanel() string {
 		t := m.playlist.tracks[i]
 		cursor := "   "
 		if i == m.cursorIndex {
-			cursor = "→  " // UI indicator for selection
+			cursor = "→  "
 		}
 
 		style := lipgloss.NewStyle()
@@ -1126,7 +1119,6 @@ func (m AppModel) renderPlaylistPanel() string {
 			style = style.Foreground(foreground)
 		}
 
-		// %-35s left-aligns strings. Truncate protects layout structure.
 		row := fmt.Sprintf("%s%d. %-35s [%s]", cursor, i+1, truncate(t.DisplayName(), 35), t.FormattedDuration())
 		builder.WriteString("  " + style.Render(row) + "\n")
 	}
@@ -1136,6 +1128,12 @@ func (m AppModel) renderPlaylistPanel() string {
 	}
 
 	return builder.String()
+}
+
+func (m AppModel) renderInputPanel() string {
+	header := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("Cambiar Directorio (Esc para cancelar, Enter para confirmar):")
+	inputBox := lipgloss.NewStyle().Padding(1, 2).MarginLeft(2).Render(m.pathInput.View())
+	return lipgloss.JoinVertical(lipgloss.Left, "  "+header, inputBox)
 }
 
 func (m AppModel) renderHelpPanel() string {
@@ -1148,7 +1146,7 @@ func (m AppModel) renderHelpPanel() string {
 	categories := []category{
 		{iconPlay + " Reproducción", []binding{{"espacio", "Play / Pausa"}, {"n / N", "Sig / Anterior"}, {"> / <", "Adel. / Atrasar"}, {"0", "Reiniciar"}}},
 		{iconNav + " Navegación", []binding{{"↑↓ / jk", "Mover cursor"}, {"enter", "Reproducir"}, {"d", "Eliminar de cola"}, {"l", "Ocultar cola"}}},
-		{iconAudio + " Audio & Modos", []binding{{"+ / -", "Volumen"}, {"m", "Silenciar"}, {"r", "Repetir"}, {"s", "Aleatorio"}}},
+		{iconAudio + " Audio & Modos", []binding{{"+ / -", "Volumen"}, {"m", "Silenciar"}, {"r", "Repetir"}, {"s", "Aleatorio"}, {"f", "Cambiar carpeta"}}},
 		{iconSystem + " Sistema", []binding{{"h / ?", "Ocultar ayuda"}, {"q", "Salir"}}},
 	}
 
@@ -1164,7 +1162,6 @@ func (m AppModel) renderHelpPanel() string {
 
 	var rows []string
 	colsPerRow := 1
-	// Responsive layout logic: changes columns based on terminal width
 	if m.width > 120 {
 		colsPerRow = 4
 	} else if m.width > 75 {
@@ -1191,7 +1188,7 @@ func (m AppModel) renderErrorScreen() string {
 		return ""
 	}
 	return lipgloss.NewStyle().Bold(true).Foreground(foreground).Background(red).Padding(1, 2).Render(
-		fmt.Sprintf("CRITICAL ERROR:\n\n%v\n\nPresiona 'q' para salir o espera a recuperarte.", m.lastError),
+		fmt.Sprintf("CRITICAL ERROR:\n\n%v\n\nEl sistema intentará recuperarse en 5 segundos o presiona 'q' para salir.", m.lastError),
 	)
 }
 
@@ -1214,9 +1211,6 @@ func clampDuration(val, min, max time.Duration) time.Duration {
 	return val
 }
 
-// Truncate handles slicing strings safely based on Rune counts instead of Bytes
-// preventing multi-byte characters (like emojis or accents) from corrupting the terminal view
-// or panicking out of bounds.
 func truncate(str string, max int) string {
 	runes := []rune(str)
 	if len(runes) > max {
@@ -1251,9 +1245,11 @@ func renderVolumeBar(level, min, max float64, muted bool) string {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func main() {
-	// Initialize the TUI program. tea.WithAltScreen() puts the app in a secondary
-	// full-screen buffer, preserving the user's normal terminal shell history behind it.
-	if _, err := tea.NewProgram(NewAppModel(), tea.WithAltScreen()).Run(); err != nil {
+	// Expose a command line flag to bypass the default scanning paths
+	dirFlag := flag.String("dir", "", "Directorio inicial de música a escanear")
+	flag.Parse()
+
+	if _, err := tea.NewProgram(NewAppModel(*dirFlag), tea.WithAltScreen()).Run(); err != nil {
 		fmt.Printf("Error al iniciar el reproductor: %v\n", err)
 		os.Exit(1)
 	}
