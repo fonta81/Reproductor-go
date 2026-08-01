@@ -1151,8 +1151,8 @@ func (m AppModel) renderPlaylistPanel() string {
 	}
 
 	var builder strings.Builder
-	builder.WriteString(lipgloss.NewStyle().Bold(true).Foreground(orange).Render("  " + iconQueue + " Próximamente:\n"))
-
+	// builder.WriteString(lipgloss.NewStyle().Bold(true).Foreground(orange).Render("  " + iconQueue + " Próximamente:\n"))
+	builder.WriteString(lipgloss.NewStyle().Bold(true).Foreground(orange).Render("  "+iconQueue+" Próximamente:") + "\n")
 	start := int(math.Max(0, float64(m.cursorIndex-3)))
 	end := int(math.Min(float64(m.playlist.Length()), float64(start+7)))
 
