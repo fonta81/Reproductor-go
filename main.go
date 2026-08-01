@@ -1192,7 +1192,7 @@ func (m AppModel) renderBrowserPanel() string {
 
 	var builder strings.Builder
 	builder.WriteString(header + "\n")
-	builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  ←/Retroceso: Subir | →/Enter: Entrar | Espacio: Confirmar Directorio | Esc: Cancelar\n\n"))
+	builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  ←/Retroceso: Subir | →/Enter: Entrar | Espacio: Confirmar Directorio | Esc: Cancelar") + "\n\n")
 
 	if len(m.browserEntries) == 0 {
 		builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  (Directorio vacío, sin subcarpetas ni pistas .mp3/.wav)\n"))
