@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -23,18 +24,47 @@ import (
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const (
-	appName         = "󰎆 GoPlayer"
+	appName         = "GoPlayer"
 	appSubtitle     = "Reproductor de música TUI"
 	defaultDir      = "./music"
 	seekSeconds     = 10
-	volumeStep      = 0.5
-	maxVolume       = 0.0   // 0.0 = 100% amplitud original (Sin distorsión)
-	minVolume       = -10.0 // Límite inferior absoluto
 	progressWidth   = 50
 	defaultDuration = 3 * time.Minute // fallback cuando no hay metadata
 
 	// Tasa de muestreo estándar para evitar aceleración (Chipmunk effect)
 	standardSampleRate = beep.SampleRate(44100)
+)
+
+// ── Iconos Nerd Font (Material Design) ───────────────────────────────────────
+// Requieren una terminal con Nerd Fonts. Si no los tienes, cámbialos por
+// caracteres ASCII o Unicode básico de tu preferencia.
+const (
+	iconPlay      = "󰐊" // nf-md-play
+	iconPause     = "󰏤" // nf-md-pause
+	iconStop      = "󰓛" // nf-md-stop
+	iconNext      = "󰒭" // nf-md-skip-next
+	iconPrev      = "󰒮" // nf-md-skip-previous
+	iconRepeatOne = "󰑘" // nf-md-repeat-once
+	iconRepeatAll = "󰑗" // nf-md-repeat
+	iconRepeatOff = "󰁔" // nf-md-arrow-right
+	iconShuffle   = "󰒟" // nf-md-shuffle
+	iconVolume    = "󰕾" // nf-md-volume-high
+	iconMute      = "󰖁" // nf-md-volume-off
+	iconQueue     = "󰉖" // nf-md-playlist-music
+	iconUp        = "󰅂" // nf-md-chevron-up
+	iconDown      = "󰅀" // nf-md-chevron-down
+	iconNav       = "󰍉" // nf-md-compass-outline
+	iconAudio     = "󰕾" // nf-md-volume-high
+	iconSystem    = "󰒓" // nf-md-cog
+)
+
+// ── Control de Volumen por Decibelios ────────────────────────────────────────
+// 100% = 0 dBFS (ganancia unidad, sin distorsión en audio normalizado).
+// El rango va de -30 dB (muy bajo) a 0 dB (máximo limpio).
+const (
+	volumeStep = 3.0   // paso de 3 dB por tecla (~ perceptible)
+	maxVolume  = 0.0   // 0 dBFS: volumen máximo limpio
+	minVolume  = -30.0 // -30 dB: piso de volumen
 )
 
 // Paleta de colores: tema Dracula optimizado para legibilidad en terminal
@@ -93,11 +123,11 @@ const (
 func (s PlaybackState) Icon() string {
 	switch s {
 	case StatePlaying:
-		return "󰐊"
+		return iconPlay
 	case StatePaused:
-		return "󰏤"
+		return iconPause
 	default:
-		return "󰓛"
+		return iconStop
 	}
 }
 
@@ -123,11 +153,11 @@ const (
 func (r RepeatMode) Icon() string {
 	switch r {
 	case RepeatOne:
-		return "󰑣"
+		return iconRepeatOne
 	case RepeatAll:
-		return "󰑘"
+		return iconRepeatAll
 	default:
-		return "󰑶"
+		return iconRepeatOff
 	}
 }
 
@@ -166,14 +196,17 @@ func (t Track) FormattedDuration() string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// DOMINIO: GESTIÓN DE LA LISTA DE REPRODUCCIÓN
+// DOMINIO: GESTIÓN DE LA LISTA DE REPRODUCCIÓN (con Shuffle robusto)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 type Playlist struct {
-	tracks  []Track
-	current int
-	shuffle bool
-	repeat  RepeatMode
+	tracks          []Track
+	current         int
+	shuffle         bool
+	repeat          RepeatMode
+	shuffleOrder    []int // permutación de índices cuando shuffle está activo
+	shuffleIdx      int   // posición actual dentro de shuffleOrder
+	shuffleStartIdx int   // posición inicial para saber cuándo termina un ciclo
 }
 
 func NewPlaylist() *Playlist {
@@ -188,19 +221,31 @@ func (p *Playlist) Add(track Track) {
 	if p.current == -1 {
 		p.current = 0
 	}
+	if p.shuffle {
+		p.regenerateShuffle()
+	}
 }
 
 func (p *Playlist) Remove(index int) {
 	if !p.isValidIndex(index) {
 		return
 	}
+
 	p.tracks = append(p.tracks[:index], p.tracks[index+1:]...)
+
+	if p.shuffle {
+		p.rebuildShuffleAfterRemove(index)
+	}
 
 	if p.current >= len(p.tracks) {
 		p.current = len(p.tracks) - 1
 	}
 	if len(p.tracks) == 0 {
 		p.current = -1
+		p.shuffleOrder = nil
+	} else if p.shuffle {
+		p.shuffleIdx = p.findInShuffleOrder(p.current)
+		p.shuffleStartIdx = p.shuffleIdx
 	}
 }
 
@@ -211,33 +256,50 @@ func (p *Playlist) Current() (Track, bool) {
 	return p.tracks[p.current], true
 }
 
+// Next avanza a la siguiente pista respetando aleatorio, repetición y fin de lista.
 func (p *Playlist) Next() (Track, bool) {
 	if len(p.tracks) == 0 {
 		return Track{}, false
 	}
 
-	if p.shuffle {
-		if len(p.tracks) <= 1 {
+	switch p.repeat {
+	case RepeatOne:
+		if p.isValidIndex(p.current) {
 			return p.tracks[p.current], true
 		}
+		return Track{}, false
+	}
 
-		nextIndex := p.current
-		for nextIndex == p.current {
-			nextIndex = rand.Intn(len(p.tracks))
+	if p.shuffle {
+		if len(p.shuffleOrder) == 0 {
+			p.regenerateShuffle()
+		}
+		if len(p.shuffleOrder) == 0 {
+			return Track{}, false
 		}
 
-		p.current = nextIndex
+		nextIdx := p.shuffleIdx + 1
+		if nextIdx >= len(p.shuffleOrder) {
+			nextIdx = 0
+		}
+
+		// Si estamos en RepeatOff y daríamos la vuelta completa, paramos.
+		if p.repeat == RepeatOff && nextIdx == p.shuffleStartIdx {
+			return Track{}, false
+		}
+
+		p.shuffleIdx = nextIdx
+		p.current = p.shuffleOrder[p.shuffleIdx]
 		return p.tracks[p.current], true
 	}
 
+	// Modo secuencial
 	switch p.repeat {
-	case RepeatOne:
-		return p.tracks[p.current], true
 	case RepeatAll:
 		p.current = (p.current + 1) % len(p.tracks)
 		return p.tracks[p.current], true
 	default:
-		if p.isLast() {
+		if p.isLastSequential() {
 			return Track{}, false
 		}
 		p.current++
@@ -245,8 +307,25 @@ func (p *Playlist) Next() (Track, bool) {
 	}
 }
 
+// Previous retrocede en el historial de reproducción (o en la lista secuencial).
 func (p *Playlist) Previous() (Track, bool) {
-	if len(p.tracks) == 0 || p.current <= 0 {
+	if len(p.tracks) == 0 || p.current < 0 {
+		return Track{}, false
+	}
+
+	if p.shuffle {
+		if len(p.shuffleOrder) == 0 {
+			return Track{}, false
+		}
+		p.shuffleIdx--
+		if p.shuffleIdx < 0 {
+			p.shuffleIdx = len(p.shuffleOrder) - 1
+		}
+		p.current = p.shuffleOrder[p.shuffleIdx]
+		return p.tracks[p.current], true
+	}
+
+	if p.current <= 0 {
 		return Track{}, false
 	}
 	p.current--
@@ -258,7 +337,22 @@ func (p *Playlist) JumpTo(index int) bool {
 		return false
 	}
 	p.current = index
+	if p.shuffle {
+		p.shuffleIdx = p.findInShuffleOrder(index)
+		p.shuffleStartIdx = p.shuffleIdx // reinicia el ciclo desde aquí
+	}
 	return true
+}
+
+func (p *Playlist) ToggleShuffle() {
+	p.shuffle = !p.shuffle
+	if p.shuffle && len(p.tracks) > 0 {
+		p.regenerateShuffle()
+	} else {
+		p.shuffleOrder = nil
+		p.shuffleIdx = 0
+		p.shuffleStartIdx = 0
+	}
 }
 
 func (p *Playlist) Length() int {
@@ -269,10 +363,25 @@ func (p *Playlist) IsEmpty() bool {
 	return len(p.tracks) == 0
 }
 
+// isLast considera tanto modo secuencial como aleatorio.
 func (p *Playlist) isLast() bool {
 	if p.repeat != RepeatOff {
 		return false
 	}
+	if p.shuffle {
+		if len(p.shuffleOrder) == 0 {
+			return true
+		}
+		nextIdx := p.shuffleIdx + 1
+		if nextIdx >= len(p.shuffleOrder) {
+			nextIdx = 0
+		}
+		return nextIdx == p.shuffleStartIdx
+	}
+	return p.isLastSequential()
+}
+
+func (p *Playlist) isLastSequential() bool {
 	return p.current >= len(p.tracks)-1
 }
 
@@ -280,9 +389,92 @@ func (p *Playlist) isValidIndex(index int) bool {
 	return index >= 0 && index < len(p.tracks)
 }
 
+// ── Internos de Shuffle ──────────────────────────────────────────────────────
+
+func (p *Playlist) regenerateShuffle() {
+	n := len(p.tracks)
+	if n == 0 {
+		return
+	}
+	p.shuffleOrder = make([]int, n)
+	for i := 0; i < n; i++ {
+		p.shuffleOrder[i] = i
+	}
+	// Fisher-Yates
+	for i := n - 1; i > 0; i-- {
+		j := rand.Intn(i + 1)
+		p.shuffleOrder[i], p.shuffleOrder[j] = p.shuffleOrder[j], p.shuffleOrder[i]
+	}
+	// Nos posicionamos en la pista actual dentro del orden barajado
+	p.shuffleIdx = 0
+	for i, idx := range p.shuffleOrder {
+		if idx == p.current {
+			p.shuffleIdx = i
+			break
+		}
+	}
+	p.shuffleStartIdx = p.shuffleIdx
+}
+
+func (p *Playlist) rebuildShuffleAfterRemove(removedIndex int) {
+	newOrder := make([]int, 0, len(p.shuffleOrder))
+	for _, idx := range p.shuffleOrder {
+		if idx == removedIndex {
+			continue
+		}
+		if idx > removedIndex {
+			idx--
+		}
+		newOrder = append(newOrder, idx)
+	}
+	p.shuffleOrder = newOrder
+}
+
+func (p *Playlist) findInShuffleOrder(trackIndex int) int {
+	for i, idx := range p.shuffleOrder {
+		if idx == trackIndex {
+			return i
+		}
+	}
+	return 0
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
-// INFRAESTRUCTURA: MOTOR DE AUDIO
+// INFRAESTRUCTURA: MOTOR DE AUDIO (con limitador anti-clipping)
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// Limiter evita que muestras por encima de |1.0| produzcan distorsión digital.
+type Limiter struct {
+	Streamer beep.Streamer
+}
+
+func (l *Limiter) Stream(samples [][2]float64) (n int, ok bool) {
+	n, ok = l.Streamer.Stream(samples)
+	for i := range samples[:n] {
+		ch := &samples[i]
+		if ch[0] > 1.0 {
+			ch[0] = 1.0
+		} else if ch[0] < -1.0 {
+			ch[0] = -1.0
+		}
+		if ch[1] > 1.0 {
+			ch[1] = 1.0
+		} else if ch[1] < -1.0 {
+			ch[1] = -1.0
+		}
+	}
+	return n, ok
+}
+
+func (l *Limiter) Err() error {
+	type streamError interface {
+		Err() error
+	}
+	if se, ok := l.Streamer.(streamError); ok {
+		return se.Err()
+	}
+	return nil
+}
 
 type AudioEngine struct {
 	streamer   beep.StreamSeekCloser
@@ -320,8 +512,10 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 		}
 	}
 
+	// Calcular duración exacta
 	realDuration := format.SampleRate.D(streamer.Len())
 
+	// Inicializar speaker una sola vez con la tasa de muestreo ESTÁNDAR
 	if !ae.isInit {
 		speaker.Init(standardSampleRate, standardSampleRate.N(time.Second/10))
 		ae.isInit = true
@@ -330,13 +524,21 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	ae.streamer = streamer
 	ae.format = format
 
+	// Remuestrear el audio original a nuestra tasa estándar
 	resampled := beep.Resample(4, format.SampleRate, standardSampleRate, streamer)
 
 	ae.ctrl = &beep.Ctrl{Streamer: resampled}
+
+	// ── ESCALA DE DECIBELIOS ──────────────────────────────────────────────
+	// Base = 10^(1/20) ≈ 1.122. Con esto:
+	//   gain = Base^Volume = 10^(Volume/20)
+	// Por tanto, el campo Volume ES directamente el valor en dB.
+	// Volume = 0  → 0 dB  → gain = 1.0  (100% limpio, sin distorsión)
+	// Volume = -30 → -30 dB → gain ≈ 0.03 (muy bajo)
 	ae.volume = &effects.Volume{
 		Streamer: ae.ctrl,
-		Base:     2,
-		Volume:   0,
+		Base:     math.Pow(10, 1.0/20.0),
+		Volume:   0, // inicia en 0 dB (unity gain)
 		Silent:   false,
 	}
 
@@ -345,7 +547,9 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 
 func (ae *AudioEngine) Play() chan struct{} {
 	done := make(chan struct{})
-	speaker.Play(beep.Seq(ae.volume, beep.Callback(func() {
+	// Envolvemos con el limiter para protección absoluta contra clipping
+	limiter := &Limiter{Streamer: ae.volume}
+	speaker.Play(beep.Seq(limiter, beep.Callback(func() {
 		close(done)
 	})))
 	return done
@@ -382,6 +586,7 @@ func (ae *AudioEngine) IsMuted() bool {
 	return ae.volume != nil && ae.volume.Silent
 }
 
+// Obtener la posición real del stream de audio
 func (ae *AudioEngine) Position() time.Duration {
 	if ae.streamer != nil {
 		return ae.format.SampleRate.D(ae.streamer.Position())
@@ -468,7 +673,7 @@ func NewAppModel() AppModel {
 		audio:       NewAudioEngine(),
 		state:       StateStopped,
 		progressBar: bar,
-		volumeLevel: 0,
+		volumeLevel: 0, // 0 dB
 		showHelp:    true,
 		showQueue:   true,
 	}
@@ -486,6 +691,7 @@ func (m AppModel) Init() tea.Cmd {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func (m AppModel) tick() tea.Cmd {
+	// Ticks más rápidos para una barra fluida
 	return tea.Tick(time.Millisecond*250, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
@@ -623,7 +829,7 @@ func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ",", "<":
 		m.seekBackward(seekSeconds)
 	case "s":
-		m.playlist.shuffle = !m.playlist.shuffle
+		m.playlist.ToggleShuffle()
 	case "r":
 		m.playlist.repeat = (m.playlist.repeat + 1) % 3
 	case "l":
@@ -891,7 +1097,7 @@ func (m AppModel) renderNowPlayingPanel() string {
 		content.WriteString(m.renderMetadataLine())
 	} else {
 		content.WriteString(
-			lipgloss.NewStyle().Bold(true).Foreground(red).Render("󰓛 Sin canciones"),
+			lipgloss.NewStyle().Bold(true).Foreground(red).Render(iconStop + " Sin canciones"),
 		)
 		content.WriteString("\n")
 		content.WriteString(
@@ -911,22 +1117,23 @@ func (m AppModel) renderNowPlayingPanel() string {
 }
 
 func (m AppModel) renderStatusLine(track Track) string {
-	icon := m.state.Icon()
-	label := m.state.Label()
-
+	var icon string
 	var style lipgloss.Style
+
 	switch m.state {
 	case StatePlaying:
+		icon = iconPlay
 		style = lipgloss.NewStyle().Bold(true).Foreground(green)
 	case StatePaused:
+		icon = iconPause
 		style = lipgloss.NewStyle().Bold(true).Foreground(yellow)
 	default:
+		icon = iconStop
 		style = lipgloss.NewStyle().Bold(true).Foreground(red)
 	}
-
 	return lipgloss.NewStyle().
 		MarginLeft(2).
-		Render(style.Render(icon+" "+label) + "  " + track.DisplayName())
+		Render(style.Render(icon) + " " + style.Render(m.state.Label()) + "  " + track.DisplayName())
 }
 
 func (m AppModel) renderProgressBar() string {
@@ -947,20 +1154,6 @@ func (m AppModel) renderProgressBar() string {
 }
 
 func (m AppModel) renderMetadataLine() string {
-	volDisplay := ""
-	if m.audio.IsMuted() {
-		volDisplay = lipgloss.NewStyle().Foreground(red).Render("󰝟 Mut")
-	} else {
-		pct := int((m.volumeLevel - minVolume) / (maxVolume - minVolume) * 100)
-		volIcon := "󰕾"
-		if pct < 30 {
-			volIcon = "󰕿"
-		} else if pct < 70 {
-			volIcon = "󰖀"
-		}
-		volDisplay = fmt.Sprintf("%s %d%%", volIcon, pct)
-	}
-
 	queueDisplay := fmt.Sprintf("%d/%d", m.playlist.current+1, m.playlist.Length())
 	if m.playlist.Length() == 0 {
 		queueDisplay = "0/0"
@@ -968,16 +1161,19 @@ func (m AppModel) renderMetadataLine() string {
 
 	metaStyle := lipgloss.NewStyle().Foreground(comment).MarginLeft(2)
 
-	shuffleIcon := " 󰒑 "
+	shuffleIcon := ""
 	if m.playlist.shuffle {
-		shuffleIcon = " 󰒎 "
+		shuffleIcon = lipgloss.NewStyle().Foreground(purple).Render(" " + iconShuffle + " ")
 	}
 
 	repeatIcon := " " + m.playlist.repeat.Icon() + " "
 
+	volBar := renderVolumeBar(m.volumeLevel, minVolume, maxVolume, m.audio.IsMuted())
+
 	return metaStyle.Render(
-		fmt.Sprintf("%s  |  󰲸 %s  |%s|%s",
-			volDisplay,
+		fmt.Sprintf("%s  |  %s %s  |%s|%s",
+			volBar,
+			iconQueue,
 			queueDisplay,
 			shuffleIcon,
 			repeatIcon,
@@ -991,7 +1187,7 @@ func (m AppModel) renderPlaylistPanel() string {
 	}
 
 	var builder strings.Builder
-	builder.WriteString(lipgloss.NewStyle().Bold(true).Foreground(orange).Render("  Próximamente:\n"))
+	builder.WriteString(lipgloss.NewStyle().Bold(true).Foreground(orange).Render("  " + iconQueue + " Próximamente:\n"))
 
 	start := m.cursorIndex - 3
 	if start < 0 {
@@ -1003,15 +1199,15 @@ func (m AppModel) renderPlaylistPanel() string {
 	}
 
 	if start > 0 {
-		builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("    ↑ ...\n"))
+		builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("    " + iconUp + " ...\n"))
 	}
 
 	for i := start; i < end; i++ {
 		t := m.playlist.tracks[i]
 
-		cursor := "  "
+		cursor := "   "
 		if i == m.cursorIndex {
-			cursor = "󰐊 "
+			cursor = "→  "
 		}
 
 		style := lipgloss.NewStyle()
@@ -1033,7 +1229,7 @@ func (m AppModel) renderPlaylistPanel() string {
 	}
 
 	if end < m.playlist.Length() {
-		builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("    ↓ ...\n"))
+		builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("    " + iconDown + " ...\n"))
 	}
 
 	return builder.String()
@@ -1051,10 +1247,10 @@ func (m AppModel) renderHelpPanel() string {
 		bindings []binding
 	}
 
-	// 1. Agrupamos lógicamente los atajos
+	// 1. Agrupamos lógicamente los atajos (con iconos Nerd Font)
 	categories := []category{
 		{
-			title: "▶ Reproducción",
+			title: iconPlay + " Reproducción",
 			bindings: []binding{
 				{"espacio", "Play / Pausa"},
 				{"n / N", "Sig / Anterior"},
@@ -1063,7 +1259,7 @@ func (m AppModel) renderHelpPanel() string {
 			},
 		},
 		{
-			title: "🧭 Navegación",
+			title: iconNav + " Navegación",
 			bindings: []binding{
 				{"↑↓ / jk", "Mover cursor"},
 				{"enter", "Reproducir"},
@@ -1072,7 +1268,7 @@ func (m AppModel) renderHelpPanel() string {
 			},
 		},
 		{
-			title: "🎛 Audio & Modos",
+			title: iconAudio + " Audio & Modos",
 			bindings: []binding{
 				{"+ / -", "Volumen"},
 				{"m", "Silenciar"},
@@ -1081,7 +1277,7 @@ func (m AppModel) renderHelpPanel() string {
 			},
 		},
 		{
-			title: "⚙️ Sistema",
+			title: iconSystem + " Sistema",
 			bindings: []binding{
 				{"h / ?", "Ocultar ayuda"},
 				{"q", "Salir"},
@@ -1193,6 +1389,40 @@ func truncate(str string, max int) string {
 		return str[:max-3] + "..."
 	}
 	return str
+}
+
+// renderVolumeBar dibuja una barra de volumen visual con colores dinámicos.
+func renderVolumeBar(level, min, max float64, muted bool) string {
+	if muted {
+		return lipgloss.NewStyle().Foreground(red).Bold(true).Render(iconMute + " MUTE")
+	}
+
+	if max == min {
+		return fmt.Sprintf("%s ░░░░░░░░░░ 0%%", iconVolume)
+	}
+
+	pct := (level - min) / (max - min)
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 1 {
+		pct = 1
+	}
+
+	filled := int(pct * 10)
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", 10-filled)
+
+	// Color dinámico: verde → amarillo → naranja según nivel
+	color := green
+	if pct > 0.85 {
+		color = orange
+	} else if pct > 0.5 {
+		color = yellow
+	}
+
+	return lipgloss.NewStyle().Foreground(color).Render(
+		fmt.Sprintf("%s %s %3.0f%%", iconVolume, bar, pct*100),
+	)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
