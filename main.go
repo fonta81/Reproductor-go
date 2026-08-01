@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -602,8 +603,15 @@ type AppModel struct {
 	musicDir        string
 	isPickingFolder bool
 	browserPath     string
-	browserEntries  []os.DirEntry
+	browserEntries  []browserEntry
 	browserCursor   int
+}
+
+// browserEntry represents a single row in the visual directory picker: either
+// a navigable subdirectory or an audio file (.mp3 / .wav) shown for context.
+type browserEntry struct {
+	name  string
+	isDir bool
 }
 
 func NewAppModel(initialDir string) AppModel {
@@ -719,12 +727,48 @@ func (m *AppModel) loadBrowserDir(target string) {
 	}
 
 	m.browserPath = target
-	m.browserEntries = nil
+
+	var dirs, files []browserEntry
 	for _, e := range entries {
-		if e.IsDir() {
-			m.browserEntries = append(m.browserEntries, e)
+		name := e.Name()
+		isDir := e.IsDir()
+
+		// e.IsDir() reflects the raw directory-entry type returned by the OS
+		// and does NOT follow symlinks, so a symlink pointing at a directory
+		// is reported as a non-directory and would otherwise vanish from the
+		// picker. Resolve the entry with os.Stat (which follows symlinks) to
+		// get an accurate answer for symlinks and other edge cases.
+		if e.Type()&os.ModeSymlink != 0 {
+			if info, statErr := os.Stat(filepath.Join(target, name)); statErr == nil {
+				isDir = info.IsDir()
+			} else {
+				// Broken symlink or no permission to resolve it: skip just
+				// this one entry rather than failing the whole directory.
+				continue
+			}
+		}
+
+		if isDir {
+			dirs = append(dirs, browserEntry{name: name, isDir: true})
+			continue
+		}
+
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext == ".mp3" || ext == ".wav" {
+			files = append(files, browserEntry{name: name, isDir: false})
 		}
 	}
+
+	sort.Slice(dirs, func(i, j int) bool {
+		return strings.ToLower(dirs[i].name) < strings.ToLower(dirs[j].name)
+	})
+	sort.Slice(files, func(i, j int) bool {
+		return strings.ToLower(files[i].name) < strings.ToLower(files[j].name)
+	})
+
+	// Directories first (for navigation), then audio files (for context on
+	// what tracks live in the current folder).
+	m.browserEntries = append(dirs, files...)
 	m.browserCursor = 0
 }
 
@@ -813,15 +857,21 @@ func (m AppModel) handleBrowserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "right", "enter":
 		if len(m.browserEntries) > 0 {
 			selected := m.browserEntries[m.browserCursor]
-			newPath := filepath.Join(m.browserPath, selected.Name())
-			m.loadBrowserDir(newPath)
+			if selected.isDir {
+				newPath := filepath.Join(m.browserPath, selected.name)
+				m.loadBrowserDir(newPath)
+			}
 		}
 	case " ":
-		var target string
+		// Confirm the currently highlighted subfolder as the new music
+		// directory. If an audio file (not a folder) is highlighted, or the
+		// listing is empty, confirm the directory currently being browsed.
+		target := m.browserPath
 		if len(m.browserEntries) > 0 {
-			target = filepath.Join(m.browserPath, m.browserEntries[m.browserCursor].Name())
-		} else {
-			target = m.browserPath
+			selected := m.browserEntries[m.browserCursor]
+			if selected.isDir {
+				target = filepath.Join(m.browserPath, selected.name)
+			}
 		}
 		m.isPickingFolder = false
 		return m, m.scanLibraryCmd(target)
@@ -1145,22 +1195,29 @@ func (m AppModel) renderBrowserPanel() string {
 	builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  ←/Retroceso: Subir | →/Enter: Entrar | Espacio: Confirmar Directorio | Esc: Cancelar\n\n"))
 
 	if len(m.browserEntries) == 0 {
-		builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  (Directorio vacío o sin subcarpetas)\n"))
+		builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  (Directorio vacío, sin subcarpetas ni pistas .mp3/.wav)\n"))
 	}
 
 	start := int(math.Max(0, float64(m.browserCursor-5)))
 	end := int(math.Min(float64(len(m.browserEntries)), float64(start+10)))
 
 	for i := start; i < end; i++ {
+		entry := m.browserEntries[i]
 		cursor := "  "
+
+		icon := iconFolder
 		style := lipgloss.NewStyle().Foreground(foreground)
+		if !entry.isDir {
+			icon = iconAudio
+			style = style.Foreground(comment)
+		}
+
 		if i == m.browserCursor {
 			cursor = "→ "
 			style = style.Foreground(pink).Bold(true)
 		}
 
-		name := m.browserEntries[i].Name()
-		builder.WriteString(style.Render(cursor+iconFolder+" "+name) + "\n")
+		builder.WriteString(style.Render(cursor+icon+" "+entry.name) + "\n")
 	}
 
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cyan).Padding(1, 2).MarginLeft(2).Render(builder.String())
