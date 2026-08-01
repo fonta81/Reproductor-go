@@ -4,10 +4,10 @@ GOPLAYER - TERMINAL USER INTERFACE (TUI) MUSIC PLAYER
 ================================================================================
 
 PURPOSE & ARCHITECTURE:
-This program is a fully functional music player built for the terminal[cite: 2]. It uses
-The Elm Architecture (Model-View-Update or MVU) implemented via the Bubble Tea framework[cite: 2].
+This program is a fully functional music player built for the terminal. It uses
+The Elm Architecture (Model-View-Update or MVU) implemented via the Bubble Tea framework.
 The architecture strictly separates state (Model), logic/events (Update), and
-rendering (View)[cite: 2].
+rendering (View).
 ================================================================================
 */
 
@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/faiface/beep"
@@ -41,12 +40,12 @@ import (
 const (
 	appName         = "GoPlayer"
 	appSubtitle     = "Reproductor de música TUI"
-	defaultDir      = "./music" // Default directory to scan for music files[cite: 2]
-	seekSeconds     = 10        // Number of seconds to jump forward/backward[cite: 2]
+	defaultDir      = "./music" // Default directory to scan for music files
+	seekSeconds     = 10        // Number of seconds to jump forward/backward
 	progressWidth   = 50
-	defaultDuration = 3 * time.Minute // Fallback duration if metadata is missing[cite: 2]
+	defaultDuration = 3 * time.Minute // Fallback duration if metadata is missing
 
-	standardSampleRate = beep.SampleRate(44100) //[cite: 2]
+	standardSampleRate = beep.SampleRate(44100) //
 )
 
 const (
@@ -71,9 +70,9 @@ const (
 )
 
 const (
-	volumeStep = 3.0   // 3 dB step represents a clearly perceptible change in volume[cite: 2].
-	maxVolume  = 0.0   // 0 dBFS is the maximum digital volume before clipping occurs[cite: 2].
-	minVolume  = -30.0 // -30 dB is considered the volume floor (virtually silent)[cite: 2].
+	volumeStep = 3.0   // 3 dB step represents a clearly perceptible change in volume.
+	maxVolume  = 0.0   // 0 dBFS is the maximum digital volume before clipping occurs.
+	minVolume  = -30.0 // -30 dB is considered the volume floor (virtually silent).
 )
 
 var (
@@ -174,7 +173,7 @@ type Track struct {
 	Artist   string
 	Album    string
 	Duration time.Duration
-	Path     string // Absolute or relative path to the physical audio file[cite: 2]
+	Path     string // Absolute or relative path to the physical audio file
 }
 
 func (t Track) DisplayName() string {
@@ -226,13 +225,10 @@ func (p *Playlist) Remove(index int) {
 	if !p.isValidIndex(index) {
 		return
 	}
-
 	p.tracks = append(p.tracks[:index], p.tracks[index+1:]...)
-
 	if p.shuffle {
 		p.rebuildShuffleAfterRemove(index)
 	}
-
 	if p.current >= len(p.tracks) {
 		p.current = len(p.tracks) - 1
 	}
@@ -264,11 +260,9 @@ func (p *Playlist) Next() (Track, bool) {
 	if len(p.tracks) == 0 {
 		return Track{}, false
 	}
-
 	if p.repeat == RepeatOne && p.isValidIndex(p.current) {
 		return p.tracks[p.current], true
 	}
-
 	if p.shuffle {
 		if len(p.shuffleOrder) == 0 {
 			p.regenerateShuffle()
@@ -276,23 +270,18 @@ func (p *Playlist) Next() (Track, bool) {
 				return Track{}, false
 			}
 		}
-
 		nextIdx := (p.shuffleIdx + 1) % len(p.shuffleOrder)
-
 		if p.repeat == RepeatOff && nextIdx == p.shuffleStartIdx {
 			return Track{}, false
 		}
-
 		p.shuffleIdx = nextIdx
 		p.current = p.shuffleOrder[p.shuffleIdx]
 		return p.tracks[p.current], true
 	}
-
 	if p.repeat == RepeatAll {
 		p.current = (p.current + 1) % len(p.tracks)
 		return p.tracks[p.current], true
 	}
-
 	if p.isLastSequential() {
 		return Track{}, false
 	}
@@ -304,7 +293,6 @@ func (p *Playlist) Previous() (Track, bool) {
 	if len(p.tracks) == 0 || p.current < 0 {
 		return Track{}, false
 	}
-
 	if p.shuffle {
 		if len(p.shuffleOrder) == 0 {
 			return Track{}, false
@@ -316,7 +304,6 @@ func (p *Playlist) Previous() (Track, bool) {
 		p.current = p.shuffleOrder[p.shuffleIdx]
 		return p.tracks[p.current], true
 	}
-
 	if p.current <= 0 {
 		return Track{}, false
 	}
@@ -376,17 +363,14 @@ func (p *Playlist) regenerateShuffle() {
 	if n == 0 {
 		return
 	}
-
 	p.shuffleOrder = make([]int, n)
 	for i := 0; i < n; i++ {
 		p.shuffleOrder[i] = i
 	}
-
 	for i := n - 1; i > 0; i-- {
 		j := rand.Intn(i + 1)
 		p.shuffleOrder[i], p.shuffleOrder[j] = p.shuffleOrder[j], p.shuffleOrder[i]
 	}
-
 	p.shuffleIdx = p.findInShuffleOrder(p.current)
 	p.shuffleStartIdx = p.shuffleIdx
 }
@@ -425,7 +409,7 @@ type Limiter struct {
 func (l *Limiter) Stream(samples [][2]float64) (n int, ok bool) {
 	n, ok = l.Streamer.Stream(samples)
 	for i := range samples[:n] {
-		for ch := 0; ch < 2; ch++ { // Left and Right channels[cite: 2]
+		for ch := 0; ch < 2; ch++ { // Left and Right channels
 			if samples[i][ch] > 1.0 {
 				samples[i][ch] = 1.0
 			} else if samples[i][ch] < -1.0 {
@@ -499,7 +483,7 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	ae.ctrl = &beep.Ctrl{Streamer: resampled}
 	ae.volume = &effects.Volume{
 		Streamer: ae.ctrl,
-		Base:     math.Pow(10, 1.0/20.0), // Setup logarithmic volume control[cite: 2]
+		Base:     math.Pow(10, 1.0/20.0), // Setup logarithmic volume control
 		Volume:   0,
 		Silent:   false,
 	}
@@ -615,20 +599,17 @@ type AppModel struct {
 	showQueue   bool
 
 	// Dynamic directory loading features
-	musicDir     string
-	pathInput    textinput.Model
-	isTypingPath bool
+	musicDir        string
+	isPickingFolder bool
+	browserPath     string
+	browserEntries  []os.DirEntry
+	browserCursor   int
 }
 
 func NewAppModel(initialDir string) AppModel {
 	bar := progress.New(progress.WithDefaultGradient())
 	bar.Width = progressWidth
 	bar.ShowPercentage = false
-
-	ti := textinput.New()
-	ti.Placeholder = "Ruta de la carpeta (ej. /home/user/Music o ./music)"
-	ti.CharLimit = 256
-	ti.Width = 60
 
 	return AppModel{
 		playlist:    NewPlaylist(),
@@ -639,12 +620,11 @@ func NewAppModel(initialDir string) AppModel {
 		showHelp:    true,
 		showQueue:   true,
 		musicDir:    initialDir,
-		pathInput:   ti,
 	}
 }
 
 func (m AppModel) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, m.scanLibraryCmd(m.musicDir), m.tick())
+	return tea.Batch(m.scanLibraryCmd(m.musicDir), m.tick())
 }
 
 func (m AppModel) tick() tea.Cmd {
@@ -658,7 +638,7 @@ func (m AppModel) scanLibraryCmd(targetDir string) tea.Cmd {
 	return func() tea.Msg {
 		var dirs []string
 
-		// Fallback scanning logic if no explicit directory was specified[cite: 2]
+		// Fallback scanning logic if no explicit directory was specified
 		if targetDir == "" {
 			home, err := os.UserHomeDir()
 			if err != nil {
@@ -731,6 +711,23 @@ func (m AppModel) loadTrackCmd(track Track) tea.Cmd {
 	}
 }
 
+func (m *AppModel) loadBrowserDir(target string) {
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		m.lastError = err
+		return
+	}
+
+	m.browserPath = target
+	m.browserEntries = nil
+	for _, e := range entries {
+		if e.IsDir() {
+			m.browserEntries = append(m.browserEntries, e)
+		}
+	}
+	m.browserCursor = 0
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // APPLICATION: STATE UPDATE (Update)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -743,9 +740,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// Divert keystrokes to the text input component when in typing mode
-		if m.isTypingPath {
-			return m.handlePathInput(msg)
+		// Divert keystrokes to the visual directory picker when active
+		if m.isPickingFolder {
+			return m.handleBrowserInput(msg)
 		}
 		return m.handleKeyInput(msg)
 
@@ -775,12 +772,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.tick()
 		}
-		// Input cursor blinking needs to be processed
-		if m.isTypingPath {
-			var cmd tea.Cmd
-			m.pathInput, cmd = m.pathInput.Update(msg)
-			return m, tea.Batch(m.tick(), cmd)
-		}
 		return m, nil
 
 	case playbackEndedMsg:
@@ -803,27 +794,39 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m AppModel) handlePathInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m AppModel) handleBrowserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc":
-		// Cancel input
-		m.isTypingPath = false
-		m.pathInput.Blur()
+	case "esc", "q":
+		m.isPickingFolder = false
 		return m, nil
-	case "enter":
-		// Submit input
-		newPath := m.pathInput.Value()
-		m.isTypingPath = false
-		m.pathInput.Blur()
-		m.pathInput.SetValue("")
-		if newPath != "" {
-			return m, m.scanLibraryCmd(newPath)
+	case "up", "k":
+		if m.browserCursor > 0 {
+			m.browserCursor--
 		}
-		return m, nil
+	case "down", "j":
+		if m.browserCursor < len(m.browserEntries)-1 {
+			m.browserCursor++
+		}
+	case "left", "backspace":
+		parent := filepath.Dir(m.browserPath)
+		m.loadBrowserDir(parent)
+	case "right", "enter":
+		if len(m.browserEntries) > 0 {
+			selected := m.browserEntries[m.browserCursor]
+			newPath := filepath.Join(m.browserPath, selected.Name())
+			m.loadBrowserDir(newPath)
+		}
+	case " ":
+		var target string
+		if len(m.browserEntries) > 0 {
+			target = filepath.Join(m.browserPath, m.browserEntries[m.browserCursor].Name())
+		} else {
+			target = m.browserPath
+		}
+		m.isPickingFolder = false
+		return m, m.scanLibraryCmd(target)
 	}
-	var cmd tea.Cmd
-	m.pathInput, cmd = m.pathInput.Update(msg)
-	return m, cmd
+	return m, nil
 }
 
 func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -831,10 +834,14 @@ func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		m.audio.Close()
 		return m, tea.Quit
-	case "f":
-		m.isTypingPath = true
-		m.pathInput.Focus()
-		return m, textinput.Blink
+	case "o", "ctrl+o":
+		m.isPickingFolder = true
+		initialDir := m.musicDir
+		if initialDir == "" {
+			initialDir = "."
+		}
+		m.loadBrowserDir(initialDir)
+		return m, nil
 	case " ":
 		return m.togglePlayback()
 	case "n":
@@ -1010,8 +1017,8 @@ func (m AppModel) View() string {
 
 	sections := []string{m.renderHeader(), m.renderNowPlayingPanel(), ""}
 
-	if m.isTypingPath {
-		sections = append(sections, m.renderInputPanel())
+	if m.isPickingFolder {
+		sections = append(sections, m.renderBrowserPanel())
 	} else {
 		if m.showQueue {
 			sections = append(sections, m.renderPlaylistPanel())
@@ -1037,10 +1044,10 @@ func (m AppModel) renderNowPlayingPanel() string {
 		content.WriteString(m.renderStatusLine(track) + "\n" + m.renderProgressBar() + "\n" + m.renderMetadataLine())
 	} else {
 		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(red).Render(iconStop + " Sin canciones\n"))
-		content.WriteString(lipgloss.NewStyle().Foreground(comment).Render("Coloca archivos .mp3 o .wav en el directorio o presiona 'f' para cambiar."))
+		content.WriteString(lipgloss.NewStyle().Foreground(comment).Render("Coloca archivos .mp3 o .wav en el directorio o presiona 'o' para explorar carpetas."))
 	}
 
-	dirDisplay := lipgloss.NewStyle().Foreground(comment).MarginLeft(2).MarginTop(1).Render(iconFolder + " Directorio: " + m.musicDir)
+	dirDisplay := lipgloss.NewStyle().Foreground(comment).MarginLeft(2).MarginTop(1).Render(iconFolder + " Directorio actual: " + m.musicDir)
 
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(purple).Padding(1, 2).Margin(0, 2).Render(content.String()) + "\n" + dirDisplay
 }
@@ -1130,10 +1137,33 @@ func (m AppModel) renderPlaylistPanel() string {
 	return builder.String()
 }
 
-func (m AppModel) renderInputPanel() string {
-	header := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("Cambiar Directorio (Esc para cancelar, Enter para confirmar):")
-	inputBox := lipgloss.NewStyle().Padding(1, 2).MarginLeft(2).Render(m.pathInput.View())
-	return lipgloss.JoinVertical(lipgloss.Left, "  "+header, inputBox)
+func (m AppModel) renderBrowserPanel() string {
+	header := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render(iconFolder + " Explorador de Carpetas: " + m.browserPath)
+
+	var builder strings.Builder
+	builder.WriteString(header + "\n")
+	builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  ←/Retroceso: Subir | →/Enter: Entrar | Espacio: Confirmar Directorio | Esc: Cancelar\n\n"))
+
+	if len(m.browserEntries) == 0 {
+		builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  (Directorio vacío o sin subcarpetas)\n"))
+	}
+
+	start := int(math.Max(0, float64(m.browserCursor-5)))
+	end := int(math.Min(float64(len(m.browserEntries)), float64(start+10)))
+
+	for i := start; i < end; i++ {
+		cursor := "  "
+		style := lipgloss.NewStyle().Foreground(foreground)
+		if i == m.browserCursor {
+			cursor = "→ "
+			style = style.Foreground(pink).Bold(true)
+		}
+
+		name := m.browserEntries[i].Name()
+		builder.WriteString(style.Render(cursor+iconFolder+" "+name) + "\n")
+	}
+
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cyan).Padding(1, 2).MarginLeft(2).Render(builder.String())
 }
 
 func (m AppModel) renderHelpPanel() string {
@@ -1146,7 +1176,7 @@ func (m AppModel) renderHelpPanel() string {
 	categories := []category{
 		{iconPlay + " Reproducción", []binding{{"espacio", "Play / Pausa"}, {"n / N", "Sig / Anterior"}, {"> / <", "Adel. / Atrasar"}, {"0", "Reiniciar"}}},
 		{iconNav + " Navegación", []binding{{"↑↓ / jk", "Mover cursor"}, {"enter", "Reproducir"}, {"d", "Eliminar de cola"}, {"l", "Ocultar cola"}}},
-		{iconAudio + " Audio & Modos", []binding{{"+ / -", "Volumen"}, {"m", "Silenciar"}, {"r", "Repetir"}, {"s", "Aleatorio"}, {"f", "Cambiar carpeta"}}},
+		{iconAudio + " Audio & Modos", []binding{{"+ / -", "Volumen"}, {"m", "Silenciar"}, {"r", "Repetir"}, {"s", "Aleatorio"}, {"o", "Explorar carpetas"}}},
 		{iconSystem + " Sistema", []binding{{"h / ?", "Ocultar ayuda"}, {"q", "Salir"}}},
 	}
 
