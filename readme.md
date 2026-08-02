@@ -41,29 +41,13 @@ GoPlayer brings a modern, sleek audio playback experience directly to your termi
 Before running GoPlayer, ensure you have the following installed on your system:
 
 - **Go** (version 1.18 or higher recommended)
-- **Cgo / Audio System Headers** (required by Beep for native audio output):
-  - **Linux**: `libasound2-dev` (ALSA support)
-    ```bash
-    # Debian/Ubuntu
-    sudo apt-get install libasound2-dev
-    
-    # Fedora
-    sudo dnf install alsa-lib-devel
-    
-    # Arch Linux
-    sudo pacman -S alsa-lib
-    ```
-  - **macOS**: Built-in CoreAudio support.
-  - **Windows**: Built-in DirectSound support.
-- **Nerd Fonts** *(Optional, but recommended)*: Supports icons for playback indicators, volume, queue, and folders.
 
----
 
 ## Installation & Setup
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/your-username/goplayer.git
+   git clone https://github.com/fonta81/Reproductor-go.git
    cd goplayer
    ```
 
@@ -71,10 +55,10 @@ Before running GoPlayer, ensure you have the following installed on your system:
    ```bash
    go mod tidy
    ```
+3. **Run the code**:
 
-3. **Build the binary**:
    ```bash
-   go build -o goplayer main.go
+   go run .
    ```
 
 ---
@@ -99,7 +83,7 @@ Pass the `-dir` flag to target a specific folder at startup:
 
 ## Keybindings & Controls
 
-### 󰐊 Playback
+### Playback
 | Key | Action |
 | :--- | :--- |
 | `Space` | Toggle Play / Pause |
@@ -109,7 +93,7 @@ Pass the `-dir` flag to target a specific folder at startup:
 | `,` or `<` | Seek backward (10 seconds) |
 | `0` | Restart current track |
 
-### 󰍉 Navigation & Queue
+### Navigation & Queue
 | Key | Action |
 | :--- | :--- |
 | `↑` / `k` | Move selection cursor up |
@@ -119,7 +103,7 @@ Pass the `-dir` flag to target a specific folder at startup:
 | `l` | Toggle visibility of queue panel |
 | `o` / `Ctrl+O` | Open visual directory browser |
 
-### 󰕾 Audio & Modes
+### Audio & Modes
 | Key | Action |
 | :--- | :--- |
 | `+` / `=` | Increase volume |
@@ -130,7 +114,7 @@ Pass the `-dir` flag to target a specific folder at startup:
 ightarrow$ One $
 ightarrow$ All) |
 
-### 󰒓 Directory Browser (Active Mode)
+### Directory Browser (Active Mode)
 | Key | Action |
 | :--- | :--- |
 | `↑` / `k` | Move cursor up |
@@ -140,7 +124,7 @@ ightarrow$ All) |
 | `Space` | Confirm and scan selected directory |
 | `Esc` / `q` | Cancel directory selection |
 
-### 󰒓 System
+### System
 | Key | Action |
 | :--- | :--- |
 | `h` or `?` | Toggle Help panel visibility |
