@@ -46,7 +46,7 @@ const (
 	progressWidth   = 50
 	defaultDuration = 3 * time.Minute // Fallback duration if metadata is missing
 
-	standardSampleRate = beep.SampleRate(44100) //
+	standardSampleRate = beep.SampleRate(44100)
 )
 
 const (
@@ -87,7 +87,6 @@ var (
 	foreground = lipgloss.Color("#F8F8F2")
 	comment    = lipgloss.Color("#6272A4")
 	selection  = lipgloss.Color("#44475A")
-	background = lipgloss.Color("#282A36")
 
 	helpContainerStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
@@ -365,7 +364,7 @@ func (p *Playlist) regenerateShuffle() {
 		return
 	}
 	p.shuffleOrder = make([]int, n)
-	for i := 0; i < n; i++ {
+	for i := range n { // Go 1.22+ rangeint modernization
 		p.shuffleOrder[i] = i
 	}
 	for i := n - 1; i > 0; i-- {
@@ -460,19 +459,23 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	case ".wav":
 		streamer, format, err = wav.Decode(file)
 	default:
-		file.Close()
+		_ = file.Close()
 		return 0, fmt.Errorf("formato no soportado: %s", ext)
 	}
 
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return 0, fmt.Errorf("error al decodificar %s: %w", track.Path, err)
 	}
 
 	realDuration := format.SampleRate.D(streamer.Len())
 
 	if !ae.isInit {
-		speaker.Init(standardSampleRate, standardSampleRate.N(time.Second/10))
+		if err := speaker.Init(standardSampleRate, standardSampleRate.N(time.Second/10)); err != nil {
+			_ = streamer.Close()
+			_ = file.Close()
+			return 0, fmt.Errorf("error al inicializar speaker: %w", err)
+		}
 		ae.isInit = true
 	}
 
@@ -484,7 +487,7 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	ae.ctrl = &beep.Ctrl{Streamer: resampled}
 	ae.volume = &effects.Volume{
 		Streamer: ae.ctrl,
-		Base:     math.Pow(10, 1.0/20.0), // Setup logarithmic volume control
+		Base:     math.Pow(10, 1.0/20.0), // Logarithmic volume control
 		Volume:   0,
 		Silent:   false,
 	}
@@ -510,7 +513,7 @@ func (ae *AudioEngine) Stop() {
 		ae.cancelChan = nil
 	}
 	if ae.streamer != nil {
-		ae.streamer.Close()
+		_ = ae.streamer.Close()
 		ae.streamer = nil
 	}
 	ae.ctrl = nil
@@ -607,8 +610,6 @@ type AppModel struct {
 	browserCursor   int
 }
 
-// browserEntry represents a single row in the visual directory picker: either
-// a navigable subdirectory or an audio file (.mp3 / .wav) shown for context.
 type browserEntry struct {
 	name  string
 	isDir bool
@@ -641,12 +642,10 @@ func (m AppModel) tick() tea.Cmd {
 	})
 }
 
-// scanLibraryCmd handles both default fallback scanning and explicit directory targeting.
 func (m AppModel) scanLibraryCmd(targetDir string) tea.Cmd {
 	return func() tea.Msg {
 		var dirs []string
 
-		// Fallback scanning logic if no explicit directory was specified
 		if targetDir == "" {
 			home, err := os.UserHomeDir()
 			if err != nil {
@@ -671,7 +670,6 @@ func (m AppModel) scanLibraryCmd(targetDir string) tea.Cmd {
 				continue
 			}
 
-			// If successfully resolved a directory in fallback mode, register it as the target
 			if targetDir == "" {
 				targetDir = dir
 			}
@@ -694,7 +692,6 @@ func (m AppModel) scanLibraryCmd(targetDir string) tea.Cmd {
 				})
 			}
 
-			// Stop searching other fallback directories if we successfully found files in one
 			if len(found) > 0 {
 				break
 			}
@@ -733,17 +730,10 @@ func (m *AppModel) loadBrowserDir(target string) {
 		name := e.Name()
 		isDir := e.IsDir()
 
-		// e.IsDir() reflects the raw directory-entry type returned by the OS
-		// and does NOT follow symlinks, so a symlink pointing at a directory
-		// is reported as a non-directory and would otherwise vanish from the
-		// picker. Resolve the entry with os.Stat (which follows symlinks) to
-		// get an accurate answer for symlinks and other edge cases.
 		if e.Type()&os.ModeSymlink != 0 {
 			if info, statErr := os.Stat(filepath.Join(target, name)); statErr == nil {
 				isDir = info.IsDir()
 			} else {
-				// Broken symlink or no permission to resolve it: skip just
-				// this one entry rather than failing the whole directory.
 				continue
 			}
 		}
@@ -766,8 +756,6 @@ func (m *AppModel) loadBrowserDir(target string) {
 		return strings.ToLower(files[i].name) < strings.ToLower(files[j].name)
 	})
 
-	// Directories first (for navigation), then audio files (for context on
-	// what tracks live in the current folder).
 	m.browserEntries = append(dirs, files...)
 	m.browserCursor = 0
 }
@@ -780,18 +768,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.progressBar.Width = int(math.Max(float64(msg.Width)*0.7, 30))
+		m.progressBar.Width = max(int(float64(msg.Width)*0.7), 30) // Go 1.21+ min/max
 		return m, nil
 
 	case tea.KeyMsg:
-		// Divert keystrokes to the visual directory picker when active
 		if m.isPickingFolder {
 			return m.handleBrowserInput(msg)
 		}
 		return m.handleKeyInput(msg)
 
 	case libraryScannedMsg:
-		// Reset the player state for the new directory
 		m.playlist.Clear()
 		m.resetPlayback()
 		m.musicDir = msg.dir
@@ -831,7 +817,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errorMsg:
 		m.lastError = msg.err
-		// Clear the error message after 5 seconds via a delayed command
 		return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return errorMsg{nil} })
 	default:
 		return m, nil
@@ -863,9 +848,6 @@ func (m AppModel) handleBrowserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case " ":
-		// Confirm the currently highlighted subfolder as the new music
-		// directory. If an audio file (not a folder) is highlighted, or the
-		// listing is empty, confirm the directory currently being browsed.
 		target := m.browserPath
 		if len(m.browserEntries) > 0 {
 			selected := m.browserEntries[m.browserCursor]
@@ -1029,11 +1011,11 @@ func (m AppModel) removeSelected() (tea.Model, tea.Cmd) {
 }
 
 func (m *AppModel) moveCursor(delta int) {
-	m.cursorIndex = int(math.Max(0, math.Min(float64(m.cursorIndex+delta), float64(m.playlist.Length()-1))))
+	m.cursorIndex = max(0, min(m.cursorIndex+delta, m.playlist.Length()-1)) // Go 1.21+ min/max
 }
 
 func (m *AppModel) adjustVolume(delta float64) {
-	m.volumeLevel = math.Max(minVolume, math.Min(maxVolume, m.volumeLevel+delta))
+	m.volumeLevel = max(minVolume, min(maxVolume, m.volumeLevel+delta)) // Go 1.21+ min/max
 	m.audio.SetVolume(m.volumeLevel)
 }
 
@@ -1091,7 +1073,11 @@ func (m AppModel) renderNowPlayingPanel() string {
 	var content strings.Builder
 
 	if hasTrack {
-		content.WriteString(m.renderStatusLine(track) + "\n" + m.renderProgressBar() + "\n" + m.renderMetadataLine())
+		content.WriteString(m.renderStatusLine(track))
+		content.WriteString("\n")
+		content.WriteString(m.renderProgressBar())
+		content.WriteString("\n")
+		content.WriteString(m.renderMetadataLine())
 	} else {
 		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(red).Render(iconStop + " Sin canciones\n"))
 		content.WriteString(lipgloss.NewStyle().Foreground(comment).Render("Coloca archivos .mp3 o .wav en el directorio o presiona 'o' para explorar carpetas."))
@@ -1151,10 +1137,11 @@ func (m AppModel) renderPlaylistPanel() string {
 	}
 
 	var builder strings.Builder
-	// builder.WriteString(lipgloss.NewStyle().Bold(true).Foreground(orange).Render("  " + iconQueue + " Próximamente:\n"))
-	builder.WriteString(lipgloss.NewStyle().Bold(true).Foreground(orange).Render("  "+iconQueue+" Próximamente:") + "\n")
-	start := int(math.Max(0, float64(m.cursorIndex-3)))
-	end := int(math.Min(float64(m.playlist.Length()), float64(start+7)))
+	builder.WriteString(lipgloss.NewStyle().Bold(true).Foreground(orange).Render("  " + iconQueue + " Próximamente:"))
+	builder.WriteString("\n")
+
+	start := max(0, m.cursorIndex-3)
+	end := min(m.playlist.Length(), start+7)
 
 	if start > 0 {
 		builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("    " + iconUp + " ...\n"))
@@ -1177,7 +1164,9 @@ func (m AppModel) renderPlaylistPanel() string {
 		}
 
 		row := fmt.Sprintf("%s%d. %-35s [%s]", cursor, i+1, truncate(t.DisplayName(), 35), t.FormattedDuration())
-		builder.WriteString("  " + style.Render(row) + "\n")
+		builder.WriteString("  ")
+		builder.WriteString(style.Render(row))
+		builder.WriteString("\n")
 	}
 
 	if end < m.playlist.Length() {
@@ -1191,15 +1180,17 @@ func (m AppModel) renderBrowserPanel() string {
 	header := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render(iconFolder + " Explorador de Carpetas: " + m.browserPath)
 
 	var builder strings.Builder
-	builder.WriteString(header + "\n")
-	builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  ←/Retroceso: Subir | →/Enter: Entrar | Espacio: Confirmar Directorio | Esc: Cancelar") + "\n\n")
+	builder.WriteString(header)
+	builder.WriteString("\n")
+	builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  ←/Retroceso: Subir | →/Enter: Entrar | Espacio: Confirmar Directorio | Esc: Cancelar"))
+	builder.WriteString("\n\n")
 
 	if len(m.browserEntries) == 0 {
 		builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  (Directorio vacío, sin subcarpetas ni pistas .mp3/.wav)\n"))
 	}
 
-	start := int(math.Max(0, float64(m.browserCursor-5)))
-	end := int(math.Min(float64(len(m.browserEntries)), float64(start+10)))
+	start := max(0, m.browserCursor-5)
+	end := min(len(m.browserEntries), start+10)
 
 	for i := start; i < end; i++ {
 		entry := m.browserEntries[i]
@@ -1217,7 +1208,8 @@ func (m AppModel) renderBrowserPanel() string {
 			style = style.Foreground(pink).Bold(true)
 		}
 
-		builder.WriteString(style.Render(cursor+icon+" "+entry.name) + "\n")
+		builder.WriteString(style.Render(cursor + icon + " " + entry.name))
+		builder.WriteString("\n")
 	}
 
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cyan).Padding(1, 2).MarginLeft(2).Render(builder.String())
@@ -1256,7 +1248,7 @@ func (m AppModel) renderHelpPanel() string {
 	}
 
 	for i := 0; i < len(blocks); i += colsPerRow {
-		end := int(math.Min(float64(i+colsPerRow), float64(len(blocks))))
+		end := min(i+colsPerRow, len(blocks))
 		var rowBlocks []string
 		for _, block := range blocks[i:end] {
 			rowBlocks = append(rowBlocks, lipgloss.NewStyle().Width(32).Render(block))
@@ -1288,33 +1280,27 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%02d:%02d", d/time.Minute, (d%time.Minute)/time.Second)
 }
 
-func clampDuration(val, min, max time.Duration) time.Duration {
-	if val < min {
-		return min
-	}
-	if val > max {
-		return max
-	}
-	return val
+func clampDuration(val, minVal, maxVal time.Duration) time.Duration {
+	return max(minVal, min(maxVal, val))
 }
 
-func truncate(str string, max int) string {
+func truncate(str string, maxLen int) string {
 	runes := []rune(str)
-	if len(runes) > max {
-		return string(runes[:max-3]) + "..."
+	if len(runes) > maxLen {
+		return string(runes[:maxLen-3]) + "..."
 	}
 	return str
 }
 
-func renderVolumeBar(level, min, max float64, muted bool) string {
+func renderVolumeBar(level, minVal, maxVal float64, muted bool) string {
 	if muted {
 		return lipgloss.NewStyle().Foreground(red).Bold(true).Render(iconMute + " MUTE")
 	}
-	if max == min {
+	if maxVal == minVal {
 		return fmt.Sprintf("%s ░░░░░░░░░░ 0%%", iconVolume)
 	}
 
-	pct := math.Max(0, math.Min(1, (level-min)/(max-min)))
+	pct := max(0.0, min(1.0, (level-minVal)/(maxVal-minVal)))
 	filled := int(pct * 10)
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", 10-filled)
 
@@ -1332,11 +1318,13 @@ func renderVolumeBar(level, min, max float64, muted bool) string {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func main() {
-	// Expose a command line flag to bypass the default scanning paths
 	dirFlag := flag.String("dir", "", "Directorio inicial de música a escanear")
 	flag.Parse()
 
-	if _, err := tea.NewProgram(NewAppModel(*dirFlag), tea.WithAltScreen()).Run(); err != nil {
+	model := NewAppModel(*dirFlag)
+	defer model.audio.Close()
+
+	if _, err := tea.NewProgram(model, tea.WithAltScreen()).Run(); err != nil {
 		fmt.Printf("Error al iniciar el reproductor: %v\n", err)
 		os.Exit(1)
 	}
