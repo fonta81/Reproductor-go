@@ -1,97 +1,153 @@
-#  Reproductor-go
+# GoPlayer
 
+> A feature-rich, terminal-based User Interface (TUI) music player written in Go, powered by **Bubble Tea**, **Lipgloss**, and **Beep**.
 
-
-##  Features
-
--  **Play MP3 & WAV** — Automatic format detection and decoding
--  **Resampling** — All audio files are resampled to a fixed sample rate (44100 Hz) so they always play at the correct speed
--  **Playback Controls** — Play, pause, next, previous, seek forward/backward
--  **Queue Management** — Navigate, select, and remove songs from the playlist
--  **Repeat Modes** — None, repeat one, repeat all
--  **Shuffle Mode** — Random playback order
--  **Volume & Mute** — Adjust volume with `+`/`-` or mute with `m`
--  **Auto-Scan** — Automatically scans `./music/`, `./songs/`, `~/Music/`, and `~/Música/` for audio files
--  **Beautiful TUI** — Dracula-themed interface built with Lipgloss
--  **Session-Safe** — Changing songs does not crash the player; old playback sessions are cleanly cancelled
+GoPlayer brings a modern, sleek audio playback experience directly to your terminal. Built following **The Elm Architecture** (Model-View-Update), it provides smooth navigation, dynamic directory browsing, volume controls, customizable playback modes, and Dracula-themed visual styling.
 
 ---
 
-##  Installation
+## Key Features
 
-### Prerequisites
+- **Terminal User Interface (TUI)**: Beautiful and responsive terminal interface with custom status indicators, progress bars, and track controls.
+- **Dynamic File Explorer**: Built-in visual directory picker (`o` / `ctrl+o`) allowing you to browse subfolders and change your music directory on the fly.
+- **Multiple Format Support**: Decodes and plays **MP3** and **WAV** audio files seamlessly.
+- **Audio Control & Engine**:
+  - Fine-grained volume control with logarithmic scaling, limiter effect, and instant muting.
+  - Seeking capability (jump forward/backward by configurable intervals).
+- **Playlist & Queue Management**:
+  - Interactive playlist displaying current, upcoming, and previous tracks.
+  - Ability to queue, reorder (via navigation), and remove individual tracks from the active session.
+- **Playback Modes**:
+  - **Shuffle**: Randomized playlist order.
+  - **Repeat Modes**: Repeat Off, Repeat One (single track), or Repeat All (entire playlist).
+- **Graceful Fallbacks & Auto-Scanning**: Automatically scans local folders (`./music`, `./songs`, `~/Music`, `~/Música`) or accepts a custom command-line directory flag.
 
-- [Go](https://go.dev/dl/) 1.21 or higher
-- Audio files (`.mp3` or `.wav`) in a music folder
+---
 
-### Clone & Build
+## Tech Stack & Architecture
+
+- **Language**: [Go (Golang)](https://golang.org/)
+- **Architecture**: The Elm Architecture / Model-View-Update (MVU)
+- **Frameworks & Libraries**:
+  - [Charm Bubble Tea](https://github.com/charmbracelet/bubbletea) — TUI framework based on Elm.
+  - [Charm Lipgloss](https://github.com/charmbracelet/lipgloss) — Style definitions and terminal layouts.
+  - [Charm Bubbles Progress](https://github.com/charmbracelet/bubbles) — Progress bar component.
+  - [Faiface Beep](https://github.com/faiface/beep) — Audio library for Go (decoding, resampling, volume control, and audio playback).
+
+---
+
+## Prerequisites
+
+Before running GoPlayer, ensure you have the following installed on your system:
+
+- **Go** (version 1.18 or higher recommended)
+- **Cgo / Audio System Headers** (required by Beep for native audio output):
+  - **Linux**: `libasound2-dev` (ALSA support)
+    ```bash
+    # Debian/Ubuntu
+    sudo apt-get install libasound2-dev
+    
+    # Fedora
+    sudo dnf install alsa-lib-devel
+    
+    # Arch Linux
+    sudo pacman -S alsa-lib
+    ```
+  - **macOS**: Built-in CoreAudio support.
+  - **Windows**: Built-in DirectSound support.
+- **Nerd Fonts** *(Optional, but recommended)*: Supports icons for playback indicators, volume, queue, and folders.
+
+---
+
+## Installation & Setup
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/your-username/goplayer.git
+   cd goplayer
+   ```
+
+2. **Install Go dependencies**:
+   ```bash
+   go mod tidy
+   ```
+
+3. **Build the binary**:
+   ```bash
+   go build -o goplayer main.go
+   ```
+
+---
+
+## Usage
+
+### Default Execution
+By default, GoPlayer scans `./music`, `./songs`, and your system's default Music folder for `.mp3` and `.wav` files:
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/goplayer.git
-cd goplayer
-
-# Download dependencies
-go mod tidy
-
-# Build the binary
-go build -o goplayer main.go
-
-# Or run directly
-go run main.go
+./goplayer
 ```
 
-### Dependencies
+### Specify a Custom Music Directory
+Pass the `-dir` flag to target a specific folder at startup:
 
 ```bash
-go get github.com/charmbracelet/bubbletea
-go get github.com/charmbracelet/bubbles
-go get github.com/charmbracelet/lipgloss
-go get github.com/faiface/beep
-go get github.com/faiface/beep/mp3
-go get github.com/faiface/beep/wav
-go get github.com/faiface/beep/speaker
-go get github.com/faiface/beep/effects
+./goplayer -dir /path/to/your/music
 ```
 
 ---
 
-##  Music Directory
+## Keybindings & Controls
 
-GoPlayer automatically scans the following directories for `.mp3` and `.wav` files:
-
-| Priority | Path | Description |
-|----------|------|-------------|
-| 1 | `./music/` | Local `music` folder in the project directory |
-| 2 | `./songs/` | Local `songs` folder |
-| 3 | `~/Music/` | Standard user music folder |
-| 4 | `~/Música/` | Spanish/Portuguese user music folder |
-
-> **Tip:** Create a `music` folder in the same directory as the binary and drop your audio files there.
-
----
-
-##  Controls
-
+### 󰐊 Playback
 | Key | Action |
-|-----|--------|
-| `Space` | Play / Pause |
-| `n` | Next song |
-| `N` (Shift+N) | Previous song |
-| `↑` / `↓` or `j` / `k` | Navigate playlist |
-| `Enter` | Play selected song |
-| `d` | Remove song from queue |
-| `+` / `-` | Volume up / down |
-| `m` | Toggle mute |
-| `>` / `<` | Seek forward / backward 10 seconds |
-| `0` | Restart current song |
-| `r` | Cycle repeat mode (None → One → All) |
-| `s` | Toggle shuffle mode |
-| `h` / `?` | Toggle help panel |
-| `q` | Quit |
+| :--- | :--- |
+| `Space` | Toggle Play / Pause |
+| `n` | Next Track |
+| `N` | Previous Track (or restart current track if elapsed > 3s) |
+| `.` or `>` | Seek forward (10 seconds) |
+| `,` or `<` | Seek backward (10 seconds) |
+| `0` | Restart current track |
+
+### 󰍉 Navigation & Queue
+| Key | Action |
+| :--- | :--- |
+| `↑` / `k` | Move selection cursor up |
+| `↓` / `j` | Move selection cursor down |
+| `Enter` | Play selected track |
+| `d` | Remove selected track from queue |
+| `l` | Toggle visibility of queue panel |
+| `o` / `Ctrl+O` | Open visual directory browser |
+
+### 󰕾 Audio & Modes
+| Key | Action |
+| :--- | :--- |
+| `+` / `=` | Increase volume |
+| `-` | Decrease volume |
+| `m` | Toggle Mute |
+| `s` | Toggle Shuffle mode |
+| `r` | Cycle Repeat mode (Off $
+ightarrow$ One $
+ightarrow$ All) |
+
+### 󰒓 Directory Browser (Active Mode)
+| Key | Action |
+| :--- | :--- |
+| `↑` / `k` | Move cursor up |
+| `↓` / `j` | Move cursor down |
+| `←` / `Backspace` | Navigate to parent directory |
+| `→` / `Enter` | Open selected directory |
+| `Space` | Confirm and scan selected directory |
+| `Esc` / `q` | Cancel directory selection |
+
+### 󰒓 System
+| Key | Action |
+| :--- | :--- |
+| `h` or `?` | Toggle Help panel visibility |
+| `q` or `Ctrl+C` | Quit GoPlayer |
 
 ---
 
-##  License
+## License
 
-![License](https://img.shields.io/badge/License-MIT-green)
+This project is licensed under the MIT License.
