@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Mensajes de la aplicación para el modelo de Bubble Tea.
 type (
 	trackLoadedMsg struct {
 		track    Track
@@ -27,6 +28,7 @@ type (
 	errorMsg struct{ err error }
 )
 
+// AppModel es el modelo principal de la aplicación que gestiona el estado del reproductor.
 type AppModel struct {
 	playlist *Playlist
 	Audio    *AudioEngine
@@ -44,7 +46,7 @@ type AppModel struct {
 	showHelp    bool
 	showQueue   bool
 
-	// Dynamic directory loading features
+	// Características de carga dinámica de directorios
 	musicDir        string
 	isPickingFolder bool
 	browserPath     string
@@ -52,11 +54,13 @@ type AppModel struct {
 	browserCursor   int
 }
 
+// browserEntry representa una entrada en el navegador de archivos.
 type browserEntry struct {
 	name  string
 	isDir bool
 }
 
+// NewAppModel crea e inicializa una nueva instancia de AppModel.
 func NewAppModel(initialDir string) AppModel {
 	bar := progress.New(progress.WithDefaultGradient())
 	bar.Width = progressWidth
@@ -74,16 +78,19 @@ func NewAppModel(initialDir string) AppModel {
 	}
 }
 
+// Init inicializa la aplicación escaneando la biblioteca y iniciando el tick.
 func (m AppModel) Init() tea.Cmd {
 	return tea.Batch(m.scanLibraryCmd(m.musicDir), m.tick())
 }
 
+// tick genera un comando para actualizar la interfaz periódicamente.
 func (m AppModel) tick() tea.Cmd {
 	return tea.Tick(time.Millisecond*250, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
 
+// scanLibraryCmd escanea un directorio en busca de archivos de audio compatibles.
 func (m AppModel) scanLibraryCmd(targetDir string) tea.Cmd {
 	return func() tea.Msg {
 		var dirs []string

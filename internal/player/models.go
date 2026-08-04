@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// PlaybackState define los estados posibles de la reproducción.
 type PlaybackState int
 
 const (
@@ -14,6 +15,7 @@ const (
 	StatePaused
 )
 
+// Icon devuelve el icono correspondiente al estado de reproducción actual.
 func (s PlaybackState) Icon() string {
 	switch s {
 	case StatePlaying:
@@ -25,6 +27,7 @@ func (s PlaybackState) Icon() string {
 	}
 }
 
+// Label devuelve la etiqueta legible para el usuario del estado de reproducción actual.
 func (s PlaybackState) Label() string {
 	switch s {
 	case StatePlaying:
@@ -36,6 +39,7 @@ func (s PlaybackState) Label() string {
 	}
 }
 
+// RepeatMode define los modos de repetición de la lista de reproducción.
 type RepeatMode int
 
 const (
@@ -44,6 +48,7 @@ const (
 	RepeatAll
 )
 
+// Icon devuelve el icono correspondiente al modo de repetición seleccionado.
 func (r RepeatMode) Icon() string {
 	switch r {
 	case RepeatOne:
@@ -55,15 +60,17 @@ func (r RepeatMode) Icon() string {
 	}
 }
 
+// Track representa una pista de audio con sus metadatos.
 type Track struct {
 	ID       string
 	Title    string
 	Artist   string
 	Album    string
 	Duration time.Duration
-	Path     string // Absolute or relative path to the physical audio file
+	Path     string // Ruta absoluta o relativa al archivo de audio físico
 }
 
+// DisplayName devuelve una cadena formateada con el artista y título de la pista.
 func (t Track) DisplayName() string {
 	if t.Artist == "" {
 		return t.Title
@@ -71,6 +78,7 @@ func (t Track) DisplayName() string {
 	return fmt.Sprintf("%s — %s", t.Artist, t.Title)
 }
 
+// FormattedDuration devuelve la duración de la pista como una cadena de tiempo legible.
 func (t Track) FormattedDuration() string {
 	if t.Duration <= 0 {
 		return "?:??"
@@ -78,6 +86,7 @@ func (t Track) FormattedDuration() string {
 	return formatDuration(t.Duration)
 }
 
+// Playlist gestiona la lista de pistas, el orden y los modos de reproducción.
 type Playlist struct {
 	tracks          []Track
 	current         int
@@ -88,6 +97,7 @@ type Playlist struct {
 	shuffleStartIdx int
 }
 
+// NewPlaylist inicializa una nueva lista de reproducción vacía.
 func NewPlaylist() *Playlist {
 	return &Playlist{
 		tracks:  make([]Track, 0),
@@ -95,6 +105,7 @@ func NewPlaylist() *Playlist {
 	}
 }
 
+// Add añade una pista a la lista de reproducción.
 func (p *Playlist) Add(track Track) {
 	p.tracks = append(p.tracks, track)
 	if p.current == -1 {
@@ -105,6 +116,7 @@ func (p *Playlist) Add(track Track) {
 	}
 }
 
+// Remove elimina una pista de la lista de reproducción por índice.
 func (p *Playlist) Remove(index int) {
 	if !p.isValidIndex(index) {
 		return
@@ -125,6 +137,7 @@ func (p *Playlist) Remove(index int) {
 	}
 }
 
+// Clear vacía la lista de reproducción.
 func (p *Playlist) Clear() {
 	p.tracks = make([]Track, 0)
 	p.current = -1
@@ -133,6 +146,7 @@ func (p *Playlist) Clear() {
 	p.shuffleStartIdx = 0
 }
 
+// Current devuelve la pista actualmente seleccionada en la lista de reproducción.
 func (p *Playlist) Current() (Track, bool) {
 	if !p.isValidIndex(p.current) {
 		return Track{}, false
@@ -140,6 +154,7 @@ func (p *Playlist) Current() (Track, bool) {
 	return p.tracks[p.current], true
 }
 
+// Next determina y devuelve la siguiente pista basada en el modo actual.
 func (p *Playlist) Next() (Track, bool) {
 	if len(p.tracks) == 0 {
 		return Track{}, false
@@ -173,6 +188,7 @@ func (p *Playlist) Next() (Track, bool) {
 	return p.tracks[p.current], true
 }
 
+// Previous determina y devuelve la pista anterior basada en el modo actual.
 func (p *Playlist) Previous() (Track, bool) {
 	if len(p.tracks) == 0 || p.current < 0 {
 		return Track{}, false
@@ -195,6 +211,7 @@ func (p *Playlist) Previous() (Track, bool) {
 	return p.tracks[p.current], true
 }
 
+// JumpTo cambia la pista actual a la especificada por índice.
 func (p *Playlist) JumpTo(index int) bool {
 	if !p.isValidIndex(index) {
 		return false
@@ -207,6 +224,7 @@ func (p *Playlist) JumpTo(index int) bool {
 	return true
 }
 
+// ToggleShuffle activa o desactiva el modo aleatorio.
 func (p *Playlist) ToggleShuffle() {
 	p.shuffle = !p.shuffle
 	if p.shuffle && len(p.tracks) > 0 {
@@ -218,9 +236,13 @@ func (p *Playlist) ToggleShuffle() {
 	}
 }
 
-func (p *Playlist) Length() int   { return len(p.tracks) }
+// Length devuelve el número total de pistas en la lista.
+func (p *Playlist) Length() int { return len(p.tracks) }
+
+// IsEmpty verifica si la lista de reproducción está vacía.
 func (p *Playlist) IsEmpty() bool { return len(p.tracks) == 0 }
 
+// isLast comprueba si la pista actual es la última, según el modo de repetición.
 func (p *Playlist) isLast() bool {
 	if p.repeat != RepeatOff {
 		return false
@@ -234,14 +256,17 @@ func (p *Playlist) isLast() bool {
 	return p.isLastSequential()
 }
 
+// isLastSequential comprueba si la pista actual es la última en orden secuencial.
 func (p *Playlist) isLastSequential() bool {
 	return p.current >= len(p.tracks)-1
 }
 
+// isValidIndex comprueba si el índice dado está dentro de los límites de la lista.
 func (p *Playlist) isValidIndex(index int) bool {
 	return index >= 0 && index < len(p.tracks)
 }
 
+// regenerateShuffle regenera el orden aleatorio de las pistas.
 func (p *Playlist) regenerateShuffle() {
 	n := len(p.tracks)
 	if n == 0 {
@@ -259,6 +284,7 @@ func (p *Playlist) regenerateShuffle() {
 	p.shuffleStartIdx = p.shuffleIdx
 }
 
+// rebuildShuffleAfterRemove actualiza el orden aleatorio tras eliminar una pista.
 func (p *Playlist) rebuildShuffleAfterRemove(removedIndex int) {
 	newOrder := make([]int, 0, len(p.shuffleOrder)-1)
 	for _, idx := range p.shuffleOrder {
@@ -273,6 +299,7 @@ func (p *Playlist) rebuildShuffleAfterRemove(removedIndex int) {
 	p.shuffleOrder = newOrder
 }
 
+// findInShuffleOrder busca el índice de la pista en el orden aleatorio.
 func (p *Playlist) findInShuffleOrder(trackIndex int) int {
 	for i, idx := range p.shuffleOrder {
 		if idx == trackIndex {

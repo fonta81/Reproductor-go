@@ -8,15 +8,18 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// formatDuration convierte una duración en un formato de cadena "MM:SS".
 func formatDuration(d time.Duration) string {
 	d = d.Round(time.Second)
 	return fmt.Sprintf("%02d:%02d", d/time.Minute, (d%time.Minute)/time.Second)
 }
 
+// clampDuration limita una duración entre un valor mínimo y máximo.
 func clampDuration(val, minVal, maxVal time.Duration) time.Duration {
 	return max(minVal, min(maxVal, val))
 }
 
+// truncate recorta una cadena a una longitud máxima, añadiendo "..." si es necesario.
 func truncate(str string, maxLen int) string {
 	runes := []rune(str)
 	if len(runes) > maxLen {
@@ -25,6 +28,7 @@ func truncate(str string, maxLen int) string {
 	return str
 }
 
+// renderVolumeBar renderiza una barra de volumen visual basada en el nivel y estado de silencio.
 func renderVolumeBar(level, minVal, maxVal float64, muted bool) string {
 	if muted {
 		return lipgloss.NewStyle().Foreground(red).Bold(true).Render(iconMute + " MUTE")

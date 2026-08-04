@@ -15,14 +15,16 @@ import (
 	"github.com/faiface/beep/wav"
 )
 
+// Limiter limita los niveles de audio para prevenir saturación (clipping).
 type Limiter struct {
 	Streamer beep.Streamer
 }
 
+// Stream implementa la interfaz beep.Streamer aplicando un limitador a los samples.
 func (l *Limiter) Stream(samples [][2]float64) (n int, ok bool) {
 	n, ok = l.Streamer.Stream(samples)
 	for i := range samples[:n] {
-		for ch := 0; ch < 2; ch++ { // Left and Right channels
+		for ch := 0; ch < 2; ch++ { // Canales Izquierdo y Derecho
 			if samples[i][ch] > 1.0 {
 				samples[i][ch] = 1.0
 			} else if samples[i][ch] < -1.0 {
@@ -33,6 +35,7 @@ func (l *Limiter) Stream(samples [][2]float64) (n int, ok bool) {
 	return n, ok
 }
 
+// Err devuelve el error de la interfaz Streamer subyacente.
 func (l *Limiter) Err() error {
 	if se, ok := l.Streamer.(interface{ Err() error }); ok {
 		return se.Err()
@@ -40,6 +43,7 @@ func (l *Limiter) Err() error {
 	return nil
 }
 
+// AudioEngine gestiona la reproducción de archivos de audio.
 type AudioEngine struct {
 	streamer   beep.StreamSeekCloser
 	ctrl       *beep.Ctrl
@@ -50,10 +54,12 @@ type AudioEngine struct {
 	cancelChan chan struct{}
 }
 
+// NewAudioEngine crea una nueva instancia del motor de audio.
 func NewAudioEngine() *AudioEngine {
 	return &AudioEngine{}
 }
 
+// Load carga un archivo de audio para su reproducción.
 func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	ae.Stop()
 
@@ -100,7 +106,7 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	ae.ctrl = &beep.Ctrl{Streamer: resampled}
 	ae.volume = &effects.Volume{
 		Streamer: ae.ctrl,
-		Base:     math.Pow(10, 1.0/20.0), // Logarithmic volume control
+		Base:     math.Pow(10, 1.0/20.0), // Control de volumen logarítmico
 		Volume:   0,
 		Silent:   false,
 	}
@@ -108,6 +114,7 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	return realDuration, nil
 }
 
+// Play inicia la reproducción del stream actual y devuelve un canal que se cierra al finalizar.
 func (ae *AudioEngine) Play() chan struct{} {
 	done := make(chan struct{})
 	limiter := &Limiter{Streamer: ae.volume}
@@ -118,6 +125,7 @@ func (ae *AudioEngine) Play() chan struct{} {
 	return done
 }
 
+// Stop detiene la reproducción actual y limpia los recursos del motor de audio.
 func (ae *AudioEngine) Stop() {
 	speaker.Clear()
 
@@ -133,22 +141,26 @@ func (ae *AudioEngine) Stop() {
 	ae.volume = nil
 }
 
+// SetVolume ajusta el volumen del motor de audio.
 func (ae *AudioEngine) SetVolume(level float64) {
 	if ae.volume != nil {
 		ae.volume.Volume = level
 	}
 }
 
+// ToggleMute alterna el estado de silencio.
 func (ae *AudioEngine) ToggleMute() {
 	if ae.volume != nil {
 		ae.volume.Silent = !ae.volume.Silent
 	}
 }
 
+// IsMuted devuelve verdadero si el audio está silenciado.
 func (ae *AudioEngine) IsMuted() bool {
 	return ae.volume != nil && ae.volume.Silent
 }
 
+// Position devuelve la posición actual de reproducción.
 func (ae *AudioEngine) Position() time.Duration {
 	if ae.streamer != nil {
 		return ae.format.SampleRate.D(ae.streamer.Position())
@@ -156,6 +168,7 @@ func (ae *AudioEngine) Position() time.Duration {
 	return 0
 }
 
+// Seek mueve la posición de reproducción a una duración específica.
 func (ae *AudioEngine) Seek(position time.Duration) error {
 	if ae.streamer == nil {
 		return fmt.Errorf("no hay stream activo")
@@ -173,6 +186,7 @@ func (ae *AudioEngine) Seek(position time.Duration) error {
 	return nil
 }
 
+// Close cierra el motor de audio liberando todos los recursos.
 func (ae *AudioEngine) Close() {
 	ae.Stop()
 	if ae.isInit {

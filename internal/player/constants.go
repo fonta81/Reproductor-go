@@ -7,17 +7,19 @@ import (
 	"github.com/faiface/beep"
 )
 
+// Configuración básica de la aplicación
 const (
 	appName         = "GoPlayer"
 	appSubtitle     = "Reproductor de música TUI"
-	defaultDir      = "./music" // Default directory to scan for music files
-	seekSeconds     = 10        // Number of seconds to jump forward/backward
+	defaultDir      = "./music" // Directorio predeterminado donde buscar archivos de música
+	seekSeconds     = 10        // Número de segundos para saltar hacia adelante/atrás
 	progressWidth   = 50
-	defaultDuration = 3 * time.Minute // Fallback duration if metadata is missing
+	defaultDuration = 3 * time.Minute // Duración predeterminada si falta metadatos
 
 	standardSampleRate = beep.SampleRate(44100)
 )
 
+// Iconos utilizados en la interfaz TUI
 const (
 	iconPlay      = "󰐊"
 	iconPause     = "󰏤"
@@ -39,12 +41,14 @@ const (
 	iconFolder    = "󰉋"
 )
 
+// Configuración de volumen en decibelios (dB)
 const (
-	volumeStep = 3.0   // 3 dB step represents a clearly perceptible change in volume.
-	maxVolume  = 0.0   // 0 dBFS is the maximum digital volume before clipping occurs.
-	minVolume  = -30.0 // -30 dB is considered the volume floor (virtually silent).
+	volumeStep = 3.0   // Paso de 3 dB que representa un cambio claramente perceptible en el volumen.
+	maxVolume  = 0.0   // 0 dBFS es el volumen digital máximo antes de que ocurra saturación (clipping).
+	minVolume  = -30.0 // -30 dB se considera el umbral mínimo de volumen (virtualmente silencioso).
 )
 
+// Paleta de colores para la interfaz TUI (Dracula theme)
 var (
 	pink       = lipgloss.Color("#FF79C6")
 	cyan       = lipgloss.Color("#8BE9FD")
@@ -57,6 +61,7 @@ var (
 	comment    = lipgloss.Color("#6272A4")
 	selection  = lipgloss.Color("#44475A")
 
+	// Estilos de lipgloss para los componentes de la interfaz
 	helpContainerStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(selection).
