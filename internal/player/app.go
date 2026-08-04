@@ -92,7 +92,7 @@ func (m AppModel) tick() tea.Cmd {
 	})
 }
 
-// scanLibraryCmd escanea un directorio en busca de archivos de audio compatibles.
+// scanLibraryCmd escanea un directorio en busca de archivos de audio compatibles de forma recursiva.
 func (m AppModel) scanLibraryCmd(targetDir string) tea.Cmd {
 	return func() tea.Msg {
 		var dirs []string
@@ -116,35 +116,29 @@ func (m AppModel) scanLibraryCmd(targetDir string) tea.Cmd {
 				continue
 			}
 
-			entries, err := os.ReadDir(dir)
-			if err != nil {
-				continue
-			}
-
-			if targetDir == "" {
-				targetDir = dir
-			}
-
-			for _, entry := range entries {
-				if entry.IsDir() {
-					continue
+			err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+				if err != nil {
+					return nil // Ignorar errores de acceso a directorios
+				}
+				if d.IsDir() {
+					return nil
 				}
 
-				ext := strings.ToLower(filepath.Ext(entry.Name()))
+				ext := strings.ToLower(filepath.Ext(d.Name()))
 				if ext != ".mp3" && ext != ".wav" {
-					continue
+					return nil
 				}
 
 				found = append(found, Track{
 					ID:     fmt.Sprintf("track-%d", len(found)),
-					Title:  strings.TrimSuffix(entry.Name(), ext),
+					Title:  strings.TrimSuffix(d.Name(), ext),
 					Artist: "Desconocido",
-					Path:   filepath.Join(dir, entry.Name()),
+					Path:   path,
 				})
-			}
-
-			if len(found) > 0 {
-				break
+				return nil
+			})
+			if err != nil {
+				continue
 			}
 		}
 
