@@ -1,5 +1,7 @@
 # GoPlayer
 
+[Read in Spanish](readme.es.md)
+
 > A feature-rich, terminal-based User Interface (TUI) music player written in Go, powered by **Bubble Tea**, **Lipgloss**, and **Beep**.
 
 GoPlayer brings a modern, sleek audio playback experience directly to your terminal. Built following **The Elm Architecture** (Model-View-Update), it provides smooth navigation, dynamic directory browsing, volume controls, customizable playback modes, and Dracula-themed visual styling.
