@@ -16,7 +16,7 @@ GoPlayer brings a modern, sleek audio playback experience directly to your termi
   - Seeking capability (jump forward/backward by configurable intervals).
 - **Playlist & Queue Management**:
   - Interactive playlist displaying current, upcoming, and previous tracks.
-  - Ability to queue, reorder (via navigation), and remove individual tracks from the active session.
+  - Ability to remove individual tracks from the active session.
 - **Playback Modes**:
   - **Shuffle**: Randomized playlist order.
   - **Repeat Modes**: Repeat Off, Repeat One (single track), or Repeat All (entire playlist).
@@ -40,7 +40,7 @@ GoPlayer brings a modern, sleek audio playback experience directly to your termi
 
 Before running GoPlayer, ensure you have the following installed on your system:
 
-- **Go** (version 1.18 or higher recommended)
+- **Go** (version 1.22 or higher recommended for modern range syntax)
 
 
 ## Installation & Setup
@@ -48,7 +48,7 @@ Before running GoPlayer, ensure you have the following installed on your system:
 1. **Clone the repository**:
    ```bash
    git clone https://github.com/fonta81/Reproductor-go.git
-   cd goplayer
+   cd Reproductor-go
    ```
 
 2. **Install Go dependencies**:
@@ -69,14 +69,14 @@ Before running GoPlayer, ensure you have the following installed on your system:
 By default, GoPlayer scans `./music`, `./songs`, and your system's default Music folder for `.mp3` and `.wav` files:
 
 ```bash
-./goplayer
+go run .
 ```
 
 ### Specify a Custom Music Directory
 Pass the `-dir` flag to target a specific folder at startup:
 
 ```bash
-./goplayer -dir /path/to/your/music
+go run . -dir /path/to/your/music
 ```
 
 ---
@@ -110,9 +110,7 @@ Pass the `-dir` flag to target a specific folder at startup:
 | `-` | Decrease volume |
 | `m` | Toggle Mute |
 | `s` | Toggle Shuffle mode |
-| `r` | Cycle Repeat mode (Off $
-ightarrow$ One $
-ightarrow$ All) |
+| `r` | Cycle Repeat mode (Off → One → All) |
 
 ### Directory Browser (Active Mode)
 | Key | Action |
