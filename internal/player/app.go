@@ -243,10 +243,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		if m.state == StatePlaying {
-			m.elapsed = m.Audio.Position()
-			if m.elapsed > m.totalTime {
-				m.elapsed = m.totalTime
-			}
+			m.elapsed = min(m.Audio.Position(), m.totalTime)
 			return m, m.tick()
 		}
 		return m, nil
@@ -276,13 +273,9 @@ func (m AppModel) handleBrowserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.isPickingFolder = false
 		return m, nil
 	case "up", "k":
-		if m.browserCursor > 0 {
-			m.browserCursor--
-		}
+		m.browserCursor = max(0, m.browserCursor-1)
 	case "down", "j":
-		if m.browserCursor < len(m.browserEntries)-1 {
-			m.browserCursor++
-		}
+		m.browserCursor = min(len(m.browserEntries)-1, m.browserCursor+1)
 	case "left", "backspace":
 		parent := filepath.Dir(m.browserPath)
 		m.loadBrowserDir(parent)
@@ -366,10 +359,7 @@ func (m AppModel) handleTrackLoaded(msg trackLoadedMsg) (tea.Model, tea.Cmd) {
 
 	done := m.Audio.Play()
 	m.state = StatePlaying
-	m.totalTime = msg.duration
-	if m.totalTime <= 0 {
-		m.totalTime = defaultDuration
-	}
+	m.totalTime = max(msg.duration, defaultDuration)
 
 	m.playlist.tracks[m.playlist.current].Duration = msg.duration
 	m.elapsed = 0
@@ -594,11 +584,12 @@ func (m AppModel) renderPlaylistPanel() string {
 		}
 
 		style := lipgloss.NewStyle()
-		if i == m.playlist.current {
+		switch {
+		case i == m.playlist.current:
 			style = style.Bold(true).Foreground(pink)
-		} else if i == m.cursorIndex {
+		case i == m.cursorIndex:
 			style = style.Foreground(cyan)
-		} else {
+		default:
 			style = style.Foreground(foreground)
 		}
 
