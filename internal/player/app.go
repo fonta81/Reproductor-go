@@ -493,30 +493,29 @@ func (m AppModel) View() string {
 }
 
 func (m AppModel) renderHeader() string {
-	title := lipgloss.NewStyle().Bold(true).Foreground(pink).MarginLeft(2).MarginTop(1).Render(appName)
-	return title + "  " + lipgloss.NewStyle().Foreground(comment).Render(appSubtitle)
+        title := lipgloss.NewStyle().Bold(true).Foreground(pink).MarginLeft(2).MarginTop(1).Render(appName)
+        return title + "  " + lipgloss.NewStyle().Foreground(comment).Render(appSubtitle)
 }
 
 func (m AppModel) renderNowPlayingPanel() string {
-	track, hasTrack := m.playlist.Current()
-	var content strings.Builder
+        track, hasTrack := m.playlist.Current()
+        var content strings.Builder
 
-	if hasTrack {
-		content.WriteString(m.renderStatusLine(track))
-		content.WriteString("\n")
-		content.WriteString(m.renderProgressBar())
-		content.WriteString("\n")
-		content.WriteString(m.renderMetadataLine())
-	} else {
-		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(red).Render(iconStop + " Sin canciones\n"))
-		content.WriteString(lipgloss.NewStyle().Foreground(comment).Render("Coloca archivos .mp3 o .wav en el directorio o presiona 'o' para explorar carpetas."))
-	}
+        if hasTrack {
+                content.WriteString(m.renderStatusLine(track))
+                content.WriteString("\n\n") // Added extra spacing
+                content.WriteString(m.renderProgressBar())
+                content.WriteString("\n\n") // Added extra spacing
+                content.WriteString(m.renderMetadataLine())
+        } else {
+                content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(red).Render(iconStop + " Sin canciones\n"))
+                content.WriteString(lipgloss.NewStyle().Foreground(comment).Render("Coloca archivos .mp3 o .wav en el directorio o presiona 'o' para explorar carpetas."))
+        }
 
-	dirDisplay := lipgloss.NewStyle().Foreground(comment).MarginLeft(2).MarginTop(1).Render(iconFolder + " Directorio actual: " + m.musicDir)
+        dirDisplay := lipgloss.NewStyle().Foreground(comment).MarginLeft(2).MarginTop(1).Render(iconFolder + " Directorio actual: " + m.musicDir)
 
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(purple).Padding(1, 2).Margin(0, 2).Render(content.String()) + "\n" + dirDisplay
+        return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(purple).Padding(1, 2).Margin(0, 2).Render(content.String()) + "\n" + dirDisplay
 }
-
 func (m AppModel) renderStatusLine(track Track) string {
 	var icon string
 	var style lipgloss.Style
@@ -532,17 +531,25 @@ func (m AppModel) renderStatusLine(track Track) string {
 	return lipgloss.NewStyle().MarginLeft(2).Render(style.Render(icon) + " " + style.Render(m.state.Label()) + "  " + track.DisplayName())
 }
 
-func (m AppModel) renderProgressBar() string {
-	percent := 0.0
-	if m.totalTime > 0 {
-		percent = float64(m.elapsed) / float64(m.totalTime)
-	}
-
-	bar := m.progressBar.ViewAs(percent)
-	timeInfo := fmt.Sprintf(" %s / %s", formatDuration(m.elapsed), formatDuration(m.totalTime))
-	return lipgloss.NewStyle().MarginLeft(2).Render(bar) + lipgloss.NewStyle().Foreground(cyan).Render(timeInfo)
+func (m *AppModel) resetProgressBar() {
+        m.progressBar.FullColor = string(pink)
+        m.progressBar.EmptyColor = string(selection)
 }
 
+func (m AppModel) renderProgressBar() string {
+        percent := 0.0
+        if m.totalTime > 0 {
+                percent = float64(m.elapsed) / float64(m.totalTime)
+        }
+
+        // Apply theme colors to progress bar dynamically
+        m.progressBar.FullColor = string(pink)
+        m.progressBar.EmptyColor = string(selection)
+
+        bar := m.progressBar.ViewAs(percent)
+        timeInfo := fmt.Sprintf(" %s / %s", formatDuration(m.elapsed), formatDuration(m.totalTime))
+        return lipgloss.NewStyle().MarginLeft(2).Render(bar) + lipgloss.NewStyle().Foreground(cyan).Render(timeInfo)
+}
 func (m AppModel) renderMetadataLine() string {
 	queueDisplay := "0/0"
 	if m.playlist.Length() > 0 {

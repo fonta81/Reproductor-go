@@ -48,18 +48,18 @@ const (
 	minVolume  = -30.0 // -30 dB se considera el umbral mínimo de volumen (virtualmente silencioso).
 )
 
-// Paleta de colores para la interfaz TUI (Dracula theme)
+// Paleta de colores para la interfaz TUI (Catppuccin Mocha inspired)
 var (
-	pink       = lipgloss.Color("#FF79C6")
-	cyan       = lipgloss.Color("#8BE9FD")
-	green      = lipgloss.Color("#50FA7B")
-	yellow     = lipgloss.Color("#F1FA8C")
-	orange     = lipgloss.Color("#FFB86C")
-	red        = lipgloss.Color("#FF5555")
-	purple     = lipgloss.Color("#BD93F9")
-	foreground = lipgloss.Color("#F8F8F2")
-	comment    = lipgloss.Color("#6272A4")
-	selection  = lipgloss.Color("#44475A")
+	pink       = lipgloss.Color("#F5C2E7")
+	cyan       = lipgloss.Color("#94E2D5")
+	green      = lipgloss.Color("#A6E3A1")
+	yellow     = lipgloss.Color("#F9E2AF")
+	orange     = lipgloss.Color("#FAB387")
+	red        = lipgloss.Color("#F38BA8")
+	purple     = lipgloss.Color("#CBA6F7")
+	foreground = lipgloss.Color("#CDD6F4")
+	comment    = lipgloss.Color("#7F849C")
+	selection  = lipgloss.Color("#313244")
 
 	// Estilos de lipgloss para los componentes de la interfaz
 	helpContainerStyle = lipgloss.NewStyle().
