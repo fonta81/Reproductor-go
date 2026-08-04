@@ -1,3 +1,5 @@
+// Package player provides the core functionality for the audio playback application,
+// including UI management, audio processing, and state handling.
 package player
 
 import (

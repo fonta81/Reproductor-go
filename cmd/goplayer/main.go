@@ -1,3 +1,4 @@
+// Package main is the entry point for the GoPlayer application.
 package main
 
 import (
