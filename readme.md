@@ -24,6 +24,24 @@ GoPlayer brings a modern, sleek audio playback experience directly to your termi
 
 ---
 
+## Project Structure
+
+```text
+.
+├── cmd
+│   └── goplayer
+│       └── main.go       # Entry point
+└── internal
+    └── player
+        ├── app.go        # UI/Application model
+        ├── audio.go      # Audio engine
+        ├── constants.go  # Constants & Styles
+        ├── models.go     # Data structures
+        └── utils.go      # Helper functions
+```
+
+---
+
 ## Tech Stack & Architecture
 
 - **Language**: [Go (Golang)](https://golang.org/)
@@ -58,7 +76,7 @@ Before running GoPlayer, ensure you have the following installed on your system:
 3. **Run the code**:
 
    ```bash
-   go run .
+   go run ./cmd/goplayer
    ```
 
 ---
@@ -69,14 +87,14 @@ Before running GoPlayer, ensure you have the following installed on your system:
 By default, GoPlayer scans `./music`, `./songs`, and your system's default Music folder for `.mp3` and `.wav` files:
 
 ```bash
-go run .
+go run ./cmd/goplayer
 ```
 
 ### Specify a Custom Music Directory
 Pass the `-dir` flag to target a specific folder at startup:
 
 ```bash
-go run . -dir /path/to/your/music
+go run ./cmd/goplayer -dir /path/to/your/music
 ```
 
 ---
