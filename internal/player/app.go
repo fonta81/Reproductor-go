@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
+
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -54,6 +56,13 @@ type AppModel struct {
 	browserPath     string
 	browserEntries  []browserEntry
 	browserCursor   int
+
+	// Quick filter / fuzzy search
+	isFiltering     bool
+	filterInput     textinput.Model
+	filterQuery     string
+	filteredIndices []int // indices into playlist.tracks
+	filterCursor    int   // position within filteredIndices
 }
 
 // browserEntry representa una entrada en el navegador de archivos.
@@ -68,15 +77,25 @@ func NewAppModel(initialDir string) AppModel {
 	bar.Width = progressWidth
 	bar.ShowPercentage = false
 
+	ti := textinput.New()
+	ti.Placeholder = "Buscar título o artista..."
+	ti.CharLimit = 200
+	ti.Width = 40
+
 	return AppModel{
-		playlist:    NewPlaylist(),
-		Audio:       NewAudioEngine(),
-		state:       StateStopped,
-		progressBar: bar,
-		volumeLevel: 0,
-		showHelp:    true,
-		showQueue:   true,
-		musicDir:    initialDir,
+		playlist:        NewPlaylist(),
+		Audio:           NewAudioEngine(),
+		state:           StateStopped,
+		progressBar:     bar,
+		volumeLevel:     0,
+		showHelp:        true,
+		showQueue:       true,
+		musicDir:        initialDir,
+		filterInput:     ti,
+		isFiltering:     false,
+		filterQuery:     "",
+		filteredIndices: nil,
+		filterCursor:    0,
 	}
 }
 
@@ -216,6 +235,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.isPickingFolder {
 			return m.handleBrowserInput(msg)
 		}
+		if m.isFiltering {
+			return m.handleFilterInput(msg)
+		}
 		return m.handleKeyInput(msg)
 
 	case libraryScannedMsg:
@@ -295,6 +317,122 @@ func (m AppModel) handleBrowserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleFilterInput routes keys to the text input and handles filtering navigation/selection.
+func (m AppModel) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.isFiltering = false
+		m.filterInput.SetValue("")
+		m.filterQuery = ""
+		m.filteredIndices = nil
+		m.filterCursor = 0
+		return m, nil
+	case "enter":
+		if len(m.filteredIndices) > 0 {
+			m.cursorIndex = m.filteredIndices[m.filterCursor]
+			m.isFiltering = false
+			return m.playSelected()
+		}
+		return m, nil
+	case "up", "k":
+		m.filterCursor = max(0, m.filterCursor-1)
+		return m, nil
+	case "down", "j":
+		m.filterCursor = min(len(m.filteredIndices)-1, m.filterCursor+1)
+		return m, nil
+	default:
+		// Let the text input handle the key and then rebuild the filter
+		var cmd tea.Cmd
+		m.filterInput, cmd = m.filterInput.Update(msg)
+		m.filterQuery = m.filterInput.Value()
+		m.rebuildFilteredIndices()
+		if m.filterCursor >= len(m.filteredIndices) {
+			m.filterCursor = max(0, len(m.filteredIndices)-1)
+		}
+		return m, cmd
+	}
+}
+
+func (m *AppModel) rebuildFilteredIndices() {
+	m.filteredIndices = make([]int, 0)
+	q := strings.TrimSpace(m.filterQuery)
+	if q == "" {
+		// Show all indices
+		for i := 0; i < m.playlist.Length(); i++ {
+			m.filteredIndices = append(m.filteredIndices, i)
+		}
+		return
+	}
+
+	// Build candidates as "Artist — Title" or just Title when artist missing
+	cands := make([]string, 0, m.playlist.Length())
+	for _, t := range m.playlist.tracks {
+		if t.Artist == "" {
+			cands = append(cands, t.Title)
+		} else {
+			cands = append(cands, t.Artist+" — "+t.Title)
+		}
+	}
+
+	type pair struct {
+		idx   int
+		score int
+	}
+	qLower := strings.ToLower(q)
+	pairs := make([]pair, 0, len(cands))
+	for i, s := range cands {
+		sLower := strings.ToLower(s)
+		// substring match
+		if strings.Contains(sLower, qLower) {
+			s := 100
+			if strings.HasPrefix(sLower, qLower) {
+				s += 50
+			}
+			// prefer shorter candidate
+			s += max(0, 50-len([]rune(sLower)))
+			pairs = append(pairs, pair{idx: i, score: s})
+			continue
+		}
+		// subsequence fuzzy match
+		if isSubsequence(qLower, sLower) {
+			s := 30 - len([]rune(sLower))/10
+			if s < 1 {
+				s = 1
+			}
+			pairs = append(pairs, pair{idx: i, score: s})
+		}
+	}
+
+	// sort pairs by score desc
+	sort.Slice(pairs, func(a, b int) bool { return pairs[a].score > pairs[b].score })
+	for _, p := range pairs {
+		m.filteredIndices = append(m.filteredIndices, p.idx)
+	}
+}
+
+// isSubsequence checks whether all runes in small appear in order within big
+func isSubsequence(small, big string) bool {
+	rSmall := []rune(small)
+	rBig := []rune(big)
+	j := 0
+	for i := 0; i < len(rBig) && j < len(rSmall); i++ {
+		if rSmall[j] == rBig[i] {
+			j++
+		}
+	}
+	return j == len(rSmall)
+}
+
+func (m AppModel) renderFilterBar() string {
+	if !m.isFiltering {
+		return ""
+	}
+	count := len(m.filteredIndices)
+	summary := fmt.Sprintf(" [%d matches]", count)
+	bar := lipgloss.NewStyle().Foreground(cyan).Render("/ ") + lipgloss.NewStyle().Foreground(foreground).Render(m.filterInput.View())
+	return lipgloss.JoinHorizontal(lipgloss.Left, bar, lipgloss.NewStyle().Foreground(comment).Render(summary))
+}
+
 func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -342,6 +480,14 @@ func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showQueue = !m.showQueue
 	case "h", "?":
 		m.showHelp = !m.showHelp
+	case "ctrl+f":
+		// Enter quick filter mode
+		m.isFiltering = true
+		m.filterInput.SetValue("")
+		m.filterQuery = ""
+		m.filteredIndices = nil
+		m.filterCursor = 0
+		return m, nil
 	}
 	return m, nil
 }
@@ -476,6 +622,9 @@ func (m AppModel) View() string {
 		sections = append(sections, m.renderBrowserPanel())
 	} else {
 		if m.showQueue {
+			if m.isFiltering {
+				sections = append(sections, m.renderFilterBar())
+			}
 			sections = append(sections, m.renderPlaylistPanel())
 		}
 		if m.showHelp {
@@ -567,6 +716,51 @@ func (m AppModel) renderPlaylistPanel() string {
 	builder.WriteString(lipgloss.NewStyle().Bold(true).Foreground(orange).Render("  " + iconQueue + " Próximamente:"))
 	builder.WriteString("\n")
 
+	// When filtering, render the filteredIndices list around filterCursor
+	if m.isFiltering {
+		if m.filteredIndices == nil || len(m.filteredIndices) == 0 {
+			builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  (No matches)") + "\n")
+			return builder.String()
+		}
+
+		start := max(0, m.filterCursor-3)
+		end := min(len(m.filteredIndices), start+7)
+
+		if start > 0 {
+			builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("    " + iconUp + " ...\n"))
+		}
+
+		for idx := start; idx < end; idx++ {
+			i := m.filteredIndices[idx]
+			t := m.playlist.tracks[i]
+			cursor := "   "
+			if idx == m.filterCursor {
+				cursor = "→  "
+			}
+
+			style := lipgloss.NewStyle()
+			if i == m.playlist.current {
+				style = style.Bold(true).Foreground(pink)
+			} else if idx == m.filterCursor {
+				style = style.Foreground(cyan)
+			} else {
+				style = style.Foreground(foreground)
+			}
+
+			row := fmt.Sprintf("%s%d. %-35s [%s]", cursor, i+1, truncate(t.DisplayName(), 35), t.FormattedDuration())
+			builder.WriteString("  ")
+			builder.WriteString(style.Render(row))
+			builder.WriteString("\n")
+		}
+
+		if end < len(m.filteredIndices) {
+			builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("    " + iconDown + " ...\n"))
+		}
+
+		return builder.String()
+	}
+
+	// Default (non-filtering) view: same as before
 	start := max(0, m.cursorIndex-3)
 	end := min(m.playlist.Length(), start+7)
 
@@ -652,7 +846,7 @@ func (m AppModel) renderHelpPanel() string {
 
 	categories := []category{
 		{iconPlay + " Reproducción", []binding{{"espacio", "Play / Pausa"}, {"n / N", "Sig / Anterior"}, {"> / <", "Adel. / Atrasar"}, {"0", "Reiniciar"}}},
-		{iconNav + " Navegación", []binding{{"↑↓ / jk", "Mover cursor"}, {"enter", "Reproducir"}, {"d", "Eliminar de cola"}, {"l", "Ocultar cola"}, {"o", "Explorar carpetas"}}},
+		{iconNav + " Navegación", []binding{{"↑↓ / jk", "Mover cursor"}, {"enter", "Reproducir"}, {"d", "Eliminar de cola"}, {"l", "Ocultar cola"}, {"o", "Explorar carpetas"}, {"ctrl+f", "Buscar / Filtrar"}}},
 		{iconAudio + " Audio & Modos", []binding{{"+ / -", "Volumen"}, {"m", "Silenciar"}, {"r", "Repetir"}, {"s", "Aleatorio"}}},
 		{iconSystem + " Sistema", []binding{{"h / ?", "Ocultar ayuda"}, {"q", "Salir"}}},
 	}
