@@ -326,6 +326,9 @@ func (m AppModel) handleBrowserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleFilterInput routes keys to the text input and handles filtering navigation/selection.
+// handleFilterInput processes key events while the quick-filter input is active.
+// Navigation keys move through the suggestion list (if present) or the matched results.
+// Enter selects the highlighted match and starts playback. Esc cancels filtering.
 func (m AppModel) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -336,6 +339,7 @@ func (m AppModel) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filterCursor = 0
 		return m, nil
 	case "enter":
+		// Play the currently selected filtered item (if any)
 		if len(m.filteredIndices) > 0 {
 			m.cursorIndex = m.filteredIndices[m.filterCursor]
 			m.isFiltering = false
@@ -343,16 +347,17 @@ func (m AppModel) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "up", "k":
-		// move through suggestions if present
+		// Move up within suggestions or filtered results
 		if len(m.suggestionIndices) > 0 {
 			m.suggestionCursor = max(0, m.suggestionCursor-1)
-			// keep filterCursor aligned to suggestion position (within filteredIndices)
+			// keep filterCursor aligned to suggestion position
 			m.filterCursor = m.suggestionCursor
 		} else {
 			m.filterCursor = max(0, m.filterCursor-1)
 		}
 		return m, nil
 	case "down", "j":
+		// Move down within suggestions or filtered results
 		if len(m.suggestionIndices) > 0 {
 			m.suggestionCursor = min(len(m.suggestionIndices)-1, m.suggestionCursor+1)
 			m.filterCursor = m.suggestionCursor
@@ -361,17 +366,20 @@ func (m AppModel) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	default:
-		// Let the text input handle the key and then rebuild the filter
+		// Delegate key handling to the text input widget, then rebuild matches
 		var cmd tea.Cmd
 		m.filterInput, cmd = m.filterInput.Update(msg)
 		oldQ := m.filterQuery
 		m.filterQuery = m.filterInput.Value()
 		m.rebuildFilteredIndices()
-		// if query changed, reset suggestion cursor and filter cursor
+
+		// Reset cursors if the query changed
 		if m.filterQuery != oldQ {
 			m.suggestionCursor = 0
 			m.filterCursor = 0
 		}
+
+		// Clamp cursors to valid ranges
 		if m.filterCursor >= len(m.filteredIndices) {
 			m.filterCursor = max(0, len(m.filteredIndices)-1)
 		}
@@ -382,16 +390,19 @@ func (m AppModel) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// rebuildFilteredIndices computes the list of matching track indices for the
+// current filter query, and prepares a small suggestion list. Matches are
+// ranked so that exact or prefix substring matches score highest; fuzzy
+// subsequence matches receive lower scores.
 func (m *AppModel) rebuildFilteredIndices() {
 	m.filteredIndices = make([]int, 0)
 	m.suggestionIndices = make([]int, 0)
 	q := strings.TrimSpace(m.filterQuery)
 	if q == "" {
-		// Show all indices
+		// No query: include all tracks and set top-N suggestions to the first items
 		for i := 0; i < m.playlist.Length(); i++ {
 			m.filteredIndices = append(m.filteredIndices, i)
 		}
-		// suggestions are top-N of full list
 		limit := min(m.suggestionLimit, len(m.filteredIndices))
 		for i := 0; i < limit; i++ {
 			m.suggestionIndices = append(m.suggestionIndices, m.filteredIndices[i])
@@ -399,7 +410,7 @@ func (m *AppModel) rebuildFilteredIndices() {
 		return
 	}
 
-	// Build candidates as "Artist — Title" or just Title when artist missing
+	// Build display candidates ("Artist — Title" or Title when Artist missing)
 	cands := make([]string, 0, m.playlist.Length())
 	for _, t := range m.playlist.tracks {
 		if t.Artist == "" {
@@ -415,55 +426,75 @@ func (m *AppModel) rebuildFilteredIndices() {
 	}
 	qLower := strings.ToLower(q)
 	pairs := make([]pair, 0, len(cands))
-	for i, s := range cands {
-		sLower := strings.ToLower(s)
-		// substring match
-		if strings.Contains(sLower, qLower) {
-			s := 100
-			if strings.HasPrefix(sLower, qLower) {
-				s += 50
+
+	// Score each candidate. Prefer substring matches (earlier position and
+	// shorter strings), fallback to a weak subsequence/fuzzy score.
+	for i := range cands {
+		candidate := cands[i]
+		candLower := strings.ToLower(candidate)
+
+		// Substring match: prefer earlier positions and shorter candidates
+		if pos := strings.Index(candLower, qLower); pos >= 0 {
+			score := 100
+			// earlier position -> higher score (reduce penalty by position)
+			score += max(0, 30-pos*2)
+			if strings.HasPrefix(candLower, qLower) {
+				score += 50
 			}
-			// prefer shorter candidate
-			s += max(0, 50-len([]rune(sLower)))
-			pairs = append(pairs, pair{idx: i, score: s})
+			// prefer shorter candidates
+			score += max(0, 50-len([]rune(candLower)))
+			pairs = append(pairs, pair{idx: i, score: score})
 			continue
 		}
-		// subsequence fuzzy match
-		if isSubsequence(qLower, sLower) {
-			s := 30 - len([]rune(sLower))/10
-			if s < 1 {
-				s = 1
+
+		// Fuzzy subsequence match (weaker signal)
+		if isSubsequence(qLower, candLower) {
+			score := 30 - len([]rune(candLower))/10
+			if score < 1 {
+				score = 1
 			}
-			pairs = append(pairs, pair{idx: i, score: s})
+			pairs = append(pairs, pair{idx: i, score: score})
 		}
 	}
 
-	// sort pairs by score desc
+	// Sort matches by descending score and extract indices
 	sort.Slice(pairs, func(a, b int) bool { return pairs[a].score > pairs[b].score })
 	for _, p := range pairs {
 		m.filteredIndices = append(m.filteredIndices, p.idx)
 	}
 
-	// compute top-N suggestions
+	// Populate top-N suggestions from filtered list
 	limit := min(m.suggestionLimit, len(m.filteredIndices))
 	for i := 0; i < limit; i++ {
 		m.suggestionIndices = append(m.suggestionIndices, m.filteredIndices[i])
 	}
 }
 
-// isSubsequence checks whether all runes in small appear in order within big
+// isSubsequence reports whether every rune in 'small' appears in order within
+// 'big'. It performs a single left-to-right scan and returns true for an empty
+// 'small' string (empty query matches everything). This is used as a cheap
+// fuzzy matching heuristic.
 func isSubsequence(small, big string) bool {
+	if small == "" {
+		return true
+	}
 	rSmall := []rune(small)
 	rBig := []rune(big)
 	j := 0
-	for i := 0; i < len(rBig) && j < len(rSmall); i++ {
-		if rSmall[j] == rBig[i] {
+	for _, rb := range rBig {
+		if rSmall[j] == rb {
 			j++
+			if j == len(rSmall) {
+				return true
+			}
 		}
 	}
-	return j == len(rSmall)
+	return false
 }
 
+// renderFilterBar builds the UI element shown when quick-filter is active.
+// It displays the text input widget and a small summary with the number of
+// matches found for the current query.
 func (m AppModel) renderFilterBar() string {
 	if !m.isFiltering {
 		return ""
@@ -474,6 +505,9 @@ func (m AppModel) renderFilterBar() string {
 	return lipgloss.JoinHorizontal(lipgloss.Left, bar, lipgloss.NewStyle().Foreground(comment).Render(summary))
 }
 
+// renderSuggestions renders the compact list of top suggestions computed from
+// the current filtered results. The suggestion list highlights the selected
+// suggestion and marks the currently playing track.
 func (m AppModel) renderSuggestions() string {
 	if !m.isFiltering || len(m.suggestionIndices) == 0 {
 		return ""
@@ -780,6 +814,10 @@ func (m AppModel) renderMetadataLine() string {
 	)
 }
 
+// renderPlaylistPanel returns a textual representation of the upcoming queue.
+// When quick-filter is active it shows a windowed view of the filtered results
+// centered at the current filter cursor. In normal mode it shows a windowed
+// view around the main cursorIndex.
 func (m AppModel) renderPlaylistPanel() string {
 	if m.playlist.IsEmpty() {
 		return ""
