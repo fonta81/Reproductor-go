@@ -19,6 +19,8 @@ GoPlayer brings a modern, sleek audio playback experience directly to your termi
 - **Playlist & Queue Management**:
   - Interactive playlist displaying current, upcoming, and previous tracks.
   - Ability to remove individual tracks from the active session.
+- **Quick Filter**: Press `Ctrl+F` to open an inline fuzzy/substring search bar that filters the playlist by Title or Artist in real time. Navigate matches with ↑/↓ or j/k, press `Enter` to play the highlighted track, and `Esc` to clear/close the filter.
+
 - **Playback Modes**:
   - **Shuffle**: Randomized playlist order.
   - **Repeat Modes**: Repeat Off, Repeat One (single track), or Repeat All (entire playlist).
@@ -122,6 +124,7 @@ go run ./cmd/goplayer -dir /path/to/your/music
 | `d` | Remove selected track from queue |
 | `l` | Toggle visibility of queue panel |
 | `o` / `Ctrl+O` | Open visual directory browser |
+| `Ctrl+F` | Open quick fuzzy/substring filter (search Title or Artist) |
 
 ### Audio & Modes
 | Key | Action |

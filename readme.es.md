@@ -19,6 +19,8 @@ GoPlayer ofrece una experiencia de reproducción de audio moderna y elegante dir
 - **Gestión de Lista de Reproducción y Cola**:
   - Lista de reproducción interactiva que muestra las pistas actuales, futuras y anteriores.
   - Capacidad de eliminar pistas individuales de la sesión activa.
+- **Filtro Rápido (Quick Filter)**: Presiona `Ctrl+F` para abrir una barra de búsqueda en línea (fuzzy/substring) que filtra la lista por Título o Artista en tiempo real. Navega coincidencias con ↑/↓ o j/k, presiona `Enter` para reproducir la pista seleccionada y `Esc` para cerrar/limpiar el filtro.
+
 - **Modos de Reproducción**:
   - **Aleatorio (Shuffle)**: Orden de lista de reproducción aleatorio.
   - **Modos de Repetición**: Repetición desactivada, Repetir una (pista única) o Repetir todo (lista completa).
@@ -121,6 +123,7 @@ go run ./cmd/goplayer -dir /ruta/a/tu/musica
 | `d` | Eliminar pista seleccionada de la cola |
 | `l` | Alternar visibilidad del panel de cola |
 | `o` / `Ctrl+O` | Abrir explorador visual de directorios |
+| `Ctrl+F` | Abrir filtro rápido (buscar Título o Artista) |
 
 ### Audio y Modos
 | Tecla | Acción |
