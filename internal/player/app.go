@@ -63,6 +63,10 @@ type AppModel struct {
 	filterQuery     string
 	filteredIndices []int // indices into playlist.tracks
 	filterCursor    int   // position within filteredIndices
+	// Suggestions list
+	suggestionLimit   int
+	suggestionIndices []int // top-N indices from filteredIndices
+	suggestionCursor  int   // selected suggestion index
 }
 
 // browserEntry representa una entrada en el navegador de archivos.
@@ -96,6 +100,10 @@ func NewAppModel(initialDir string) AppModel {
 		filterQuery:     "",
 		filteredIndices: nil,
 		filterCursor:    0,
+		// suggestions
+		suggestionLimit:   6,
+		suggestionIndices: nil,
+		suggestionCursor:  0,
 	}
 }
 
@@ -335,19 +343,40 @@ func (m AppModel) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "up", "k":
-		m.filterCursor = max(0, m.filterCursor-1)
+		// move through suggestions if present
+		if len(m.suggestionIndices) > 0 {
+			m.suggestionCursor = max(0, m.suggestionCursor-1)
+			// keep filterCursor aligned to suggestion position (within filteredIndices)
+			m.filterCursor = m.suggestionCursor
+		} else {
+			m.filterCursor = max(0, m.filterCursor-1)
+		}
 		return m, nil
 	case "down", "j":
-		m.filterCursor = min(len(m.filteredIndices)-1, m.filterCursor+1)
+		if len(m.suggestionIndices) > 0 {
+			m.suggestionCursor = min(len(m.suggestionIndices)-1, m.suggestionCursor+1)
+			m.filterCursor = m.suggestionCursor
+		} else {
+			m.filterCursor = min(len(m.filteredIndices)-1, m.filterCursor+1)
+		}
 		return m, nil
 	default:
 		// Let the text input handle the key and then rebuild the filter
 		var cmd tea.Cmd
 		m.filterInput, cmd = m.filterInput.Update(msg)
+		oldQ := m.filterQuery
 		m.filterQuery = m.filterInput.Value()
 		m.rebuildFilteredIndices()
+		// if query changed, reset suggestion cursor and filter cursor
+		if m.filterQuery != oldQ {
+			m.suggestionCursor = 0
+			m.filterCursor = 0
+		}
 		if m.filterCursor >= len(m.filteredIndices) {
 			m.filterCursor = max(0, len(m.filteredIndices)-1)
+		}
+		if m.suggestionCursor >= len(m.suggestionIndices) {
+			m.suggestionCursor = max(0, len(m.suggestionIndices)-1)
 		}
 		return m, cmd
 	}
@@ -355,11 +384,17 @@ func (m AppModel) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *AppModel) rebuildFilteredIndices() {
 	m.filteredIndices = make([]int, 0)
+	m.suggestionIndices = make([]int, 0)
 	q := strings.TrimSpace(m.filterQuery)
 	if q == "" {
 		// Show all indices
 		for i := 0; i < m.playlist.Length(); i++ {
 			m.filteredIndices = append(m.filteredIndices, i)
+		}
+		// suggestions are top-N of full list
+		limit := min(m.suggestionLimit, len(m.filteredIndices))
+		for i := 0; i < limit; i++ {
+			m.suggestionIndices = append(m.suggestionIndices, m.filteredIndices[i])
 		}
 		return
 	}
@@ -408,6 +443,12 @@ func (m *AppModel) rebuildFilteredIndices() {
 	for _, p := range pairs {
 		m.filteredIndices = append(m.filteredIndices, p.idx)
 	}
+
+	// compute top-N suggestions
+	limit := min(m.suggestionLimit, len(m.filteredIndices))
+	for i := 0; i < limit; i++ {
+		m.suggestionIndices = append(m.suggestionIndices, m.filteredIndices[i])
+	}
 }
 
 // isSubsequence checks whether all runes in small appear in order within big
@@ -431,6 +472,37 @@ func (m AppModel) renderFilterBar() string {
 	summary := fmt.Sprintf(" [%d matches]", count)
 	bar := lipgloss.NewStyle().Foreground(cyan).Render("/ ") + lipgloss.NewStyle().Foreground(foreground).Render(m.filterInput.View())
 	return lipgloss.JoinHorizontal(lipgloss.Left, bar, lipgloss.NewStyle().Foreground(comment).Render(summary))
+}
+
+func (m AppModel) renderSuggestions() string {
+	if !m.isFiltering || len(m.suggestionIndices) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(lipgloss.NewStyle().Foreground(comment).Render(" Sugerencias:"))
+	b.WriteString("\n")
+	limit := len(m.suggestionIndices)
+	for i := 0; i < limit; i++ {
+		idx := m.suggestionIndices[i]
+		t := m.playlist.tracks[idx]
+		cursor := "   "
+		if i == m.suggestionCursor {
+			cursor = "→  "
+		}
+		row := fmt.Sprintf("%s%d. %-40s [%s]", cursor, idx+1, truncate(t.DisplayName(), 40), t.FormattedDuration())
+		style := lipgloss.NewStyle()
+		if idx == m.playlist.current {
+			style = style.Bold(true).Foreground(pink)
+		} else if i == m.suggestionCursor {
+			style = style.Foreground(cyan)
+		} else {
+			style = style.Foreground(foreground)
+		}
+		b.WriteString("  ")
+		b.WriteString(style.Render(row))
+		b.WriteString("\n")
+	}
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(selection).Padding(0, 1).MarginLeft(2).Render(b.String())
 }
 
 func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -624,6 +696,7 @@ func (m AppModel) View() string {
 		if m.showQueue {
 			if m.isFiltering {
 				sections = append(sections, m.renderFilterBar())
+				sections = append(sections, m.renderSuggestions())
 			}
 			sections = append(sections, m.renderPlaylistPanel())
 		}
