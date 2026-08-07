@@ -152,16 +152,13 @@ func (m AppModel) scanLibraryCmd(targetDir string) tea.Cmd {
 				}
 
 				ext := strings.ToLower(filepath.Ext(d.Name()))
-				if ext != ".mp3" && ext != ".wav" {
+				if ext != ".mp3" && ext != ".wav" && ext != ".flac" && ext != ".ogg" {
 					return nil
 				}
 
-				found = append(found, Track{
-					ID:     fmt.Sprintf("track-%d", len(found)),
-					Title:  strings.TrimSuffix(d.Name(), ext),
-					Artist: "Desconocido",
-					Path:   path,
-				})
+				track := ExtractMetadata(path)
+				track.ID = fmt.Sprintf("track-%d", len(found))
+				found = append(found, track)
 				return nil
 			})
 			if err != nil {

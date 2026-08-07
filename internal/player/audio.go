@@ -10,8 +10,10 @@ import (
 
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/effects"
+	"github.com/faiface/beep/flac"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
+	"github.com/faiface/beep/vorbis"
 	"github.com/faiface/beep/wav"
 )
 
@@ -77,6 +79,10 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 		streamer, format, err = mp3.Decode(file)
 	case ".wav":
 		streamer, format, err = wav.Decode(file)
+	case ".flac":
+		streamer, format, err = flac.Decode(file)
+	case ".ogg":
+		streamer, format, err = vorbis.Decode(file)
 	default:
 		_ = file.Close()
 		return 0, fmt.Errorf("formato no soportado: %s", ext)

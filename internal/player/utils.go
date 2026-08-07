@@ -2,10 +2,13 @@ package player
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/dhowden/tag"
 )
 
 // formatDuration convierte una duración en un formato de cadena "MM:SS".
@@ -26,6 +29,43 @@ func truncate(str string, maxLen int) string {
 		return string(runes[:maxLen-3]) + "..."
 	}
 	return str
+}
+
+// ExtractMetadata intenta extraer metadatos de un archivo de audio.
+// Si falla o faltan campos, usa valores predeterminados basados en el nombre del archivo.
+func ExtractMetadata(path string) Track {
+	ext := strings.ToLower(filepath.Ext(path))
+	filename := strings.TrimSuffix(filepath.Base(path), ext)
+
+	track := Track{
+		Title:  filename,
+		Artist: "Desconocido",
+		Album:  "Desconocido",
+		Path:   path,
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return track
+	}
+	defer f.Close()
+
+	m, err := tag.ReadFrom(f)
+	if err != nil {
+		return track
+	}
+
+	if t := m.Title(); t != "" {
+		track.Title = t
+	}
+	if a := m.Artist(); a != "" {
+		track.Artist = a
+	}
+	if al := m.Album(); al != "" {
+		track.Album = al
+	}
+
+	return track
 }
 
 // renderVolumeBar renderiza una barra de volumen visual basada en el nivel y estado de silencio.
