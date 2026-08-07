@@ -12,13 +12,14 @@ GoPlayer ofrece una experiencia de reproducción de audio moderna y elegante dir
 
 - **Interfaz de Usuario de Terminal (TUI)**: Interfaz de terminal hermosa y responsiva con indicadores de estado, barras de progreso y controles de pista personalizados.
 - **Explorador de Archivos Dinámico**: Selector visual de directorios integrado (`o` / `ctrl+o`) que permite explorar subcarpetas y cambiar el directorio de música sobre la marcha.
-- **Soporte para Múltiples Formatos**: Decodifica y reproduce archivos de audio **MP3** y **WAV** sin problemas.
+- **Soporte para Múltiples Formatos**: Decodifica y reproduce archivos de audio **MP3**, **WAV**, **FLAC** y **OGG** sin problemas.
 - **Control de Audio y Motor**:
   - Control de volumen preciso con escala logarítmica, efecto limitador y silenciado instantáneo.
   - Capacidad de búsqueda (saltar hacia adelante/atrás mediante intervalos configurables).
 - **Gestión de Lista de Reproducción y Cola**:
   - Lista de reproducción interactiva que muestra las pistas actuales, futuras y anteriores.
   - Capacidad de eliminar pistas individuales de la sesión activa.
+- **Extracción de Metadatos**: Extrae automáticamente metadatos de **Título**, **Artista** y **Álbum** de las etiquetas de audio.
 - **Filtro Rápido (Quick Filter)**: Presiona `Ctrl+F` para abrir una barra de búsqueda en línea (fuzzy/substring) que filtra la lista por Título o Artista en tiempo real. Navega coincidencias con ↑/↓ o j/k, presiona `Enter` para reproducir la pista seleccionada y `Esc` para cerrar/limpiar el filtro.
 
 - **Modos de Reproducción**:

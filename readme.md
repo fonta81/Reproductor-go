@@ -12,13 +12,14 @@ GoPlayer brings a modern, sleek audio playback experience directly to your termi
 
 - **Terminal User Interface (TUI)**: Beautiful and responsive terminal interface with custom status indicators, progress bars, and track controls.
 - **Dynamic File Explorer**: Built-in visual directory picker (`o` / `ctrl+o`) allowing you to browse subfolders and change your music directory on the fly.
-- **Multiple Format Support**: Decodes and plays **MP3** and **WAV** audio files seamlessly.
+- **Multiple Format Support**: Decodes and plays **MP3**, **WAV**, **FLAC**, and **OGG** audio files seamlessly.
 - **Audio Control & Engine**:
   - Fine-grained volume control with logarithmic scaling, limiter effect, and instant muting.
   - Seeking capability (jump forward/backward by configurable intervals).
 - **Playlist & Queue Management**:
   - Interactive playlist displaying current, upcoming, and previous tracks.
   - Ability to remove individual tracks from the active session.
+- **Metadata Extraction**: Automatically extracts **Title**, **Artist**, and **Album** metadata from audio tags.
 - **Quick Filter**: Press `Ctrl+F` to open an inline fuzzy/substring search bar that filters the playlist by Title or Artist in real time. Navigate matches with ↑/↓ or j/k, press `Enter` to play the highlighted track, and `Esc` to clear/close the filter.
 
 - **Playback Modes**:
