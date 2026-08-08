@@ -1,6 +1,7 @@
 package player
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -88,4 +89,36 @@ func renderVolumeBar(level, minVal, maxVal float64, muted bool) string {
 		color = yellow
 	}
 	return lipgloss.NewStyle().Foreground(color).Render(fmt.Sprintf("%s %s %3.0f%%", iconVolume, bar, pct*100))
+}
+
+// IsMusicDir devuelve true si el directorio existe y contiene al menos un archivo de audio soportado.
+func IsMusicDir(path string) bool {
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	var found bool
+	walkErr := filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(d.Name()))
+		switch ext {
+		case ".mp3", ".wav", ".flac", ".ogg":
+			found = true
+			return errors.New("found")
+		default:
+			return nil
+		}
+	})
+	if walkErr != nil && walkErr.Error() == "found" {
+		return true
+	}
+	return found
 }

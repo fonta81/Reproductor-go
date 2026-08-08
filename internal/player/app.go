@@ -29,7 +29,9 @@ type (
 		tracks []Track
 		dir    string
 	}
-	errorMsg struct{ err error }
+	// noMusicFoundMsg se envía cuando un escaneo no devuelve pistas; abre el explorador.
+	noMusicFoundMsg struct{ dir string }
+	errorMsg        struct{ err error }
 )
 
 // AppModel es el modelo principal de la aplicación que gestiona el estado del reproductor.
@@ -167,7 +169,7 @@ func (m AppModel) scanLibraryCmd(targetDir string) tea.Cmd {
 		}
 
 		if len(found) == 0 {
-			return errorMsg{fmt.Errorf("no se encontraron archivos de audio en: %s", targetDir)}
+			return noMusicFoundMsg{dir: targetDir}
 		}
 
 		return libraryScannedMsg{tracks: found, dir: targetDir}
@@ -257,6 +259,17 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.playlist.IsEmpty() && m.state == StateStopped {
 			m.playlist.current = 0
 		}
+		return m, nil
+
+	case noMusicFoundMsg:
+		// Abrir el navegador para que el usuario seleccione una carpeta con pistas
+		m.lastError = nil
+		m.isPickingFolder = true
+		initial := msg.dir
+		if initial == "" {
+			initial = "."
+		}
+		m.loadBrowserDir(initial)
 		return m, nil
 
 	case trackLoadedMsg:

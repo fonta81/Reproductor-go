@@ -17,6 +17,12 @@ func main() {
 	flag.Parse()
 
 	// Crear el modelo de la aplicación y asegurar el cierre del motor de audio al finalizar.
+	if *dirFlag == "" {
+		if saved, err := player.LoadConfig(); err == nil && saved != "" {
+			*dirFlag = saved
+		}
+	}
+
 	model := player.NewAppModel(*dirFlag)
 	defer model.Audio.Close()
 
