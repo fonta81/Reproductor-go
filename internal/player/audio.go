@@ -147,18 +147,46 @@ func (ae *AudioEngine) Stop() {
 	ae.volume = nil
 }
 
+// Pause pausa la reproducción actual. Usa speaker.Lock/Unlock, tal como
+// requiere beep.Ctrl, para evitar condiciones de carrera con la goroutine
+// de audio que llama a Stream() concurrentemente.
+func (ae *AudioEngine) Pause() {
+	if ae.ctrl == nil {
+		return
+	}
+	speaker.Lock()
+	ae.ctrl.Paused = true
+	speaker.Unlock()
+}
+
+// Resume reanuda la reproducción previamente pausada de forma segura.
+func (ae *AudioEngine) Resume() {
+	if ae.ctrl == nil {
+		return
+	}
+	speaker.Lock()
+	ae.ctrl.Paused = false
+	speaker.Unlock()
+}
+
 // SetVolume ajusta el volumen del motor de audio.
 func (ae *AudioEngine) SetVolume(level float64) {
-	if ae.volume != nil {
-		ae.volume.Volume = level
+	if ae.volume == nil {
+		return
 	}
+	speaker.Lock()
+	ae.volume.Volume = level
+	speaker.Unlock()
 }
 
 // ToggleMute alterna el estado de silencio.
 func (ae *AudioEngine) ToggleMute() {
-	if ae.volume != nil {
-		ae.volume.Silent = !ae.volume.Silent
+	if ae.volume == nil {
+		return
 	}
+	speaker.Lock()
+	ae.volume.Silent = !ae.volume.Silent
+	speaker.Unlock()
 }
 
 // IsMuted devuelve verdadero si el audio está silenciado.
@@ -186,7 +214,11 @@ func (ae *AudioEngine) Seek(position time.Duration) error {
 	}
 
 	samples := int(position.Seconds()) * int(ae.format.SampleRate)
-	if err := seeker.Seek(samples); err != nil {
+
+	speaker.Lock()
+	err := seeker.Seek(samples)
+	speaker.Unlock()
+	if err != nil {
 		return fmt.Errorf("seek fallido: %w", err)
 	}
 	return nil

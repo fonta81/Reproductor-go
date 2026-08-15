@@ -259,6 +259,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.playlist.IsEmpty() && m.state == StateStopped {
 			m.playlist.current = 0
 		}
+		if msg.dir != "" {
+			// Recordar el directorio para que LoadConfig() lo recupere en el
+			// próximo arranque. Antes SaveMusicDir nunca se invocaba, así
+			// que la carpeta elegida con el explorador ('o') se perdía al
+			// cerrar la aplicación.
+			_ = SaveMusicDir(msg.dir)
+		}
 		return m, nil
 
 	case noMusicFoundMsg:
@@ -295,7 +302,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errorMsg:
 		m.lastError = msg.err
-		return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return errorMsg{nil} })
+		if msg.err != nil {
+			// Solo se programa el borrado automático cuando llega un error
+			// real. De lo contrario, el propio mensaje de limpieza
+			// (errorMsg{nil}) volvía a programar otro temporizador cada 5
+			// segundos indefinidamente.
+			return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return errorMsg{nil} })
+		}
+		return m, nil
 	default:
 		return m, nil
 	}
@@ -634,9 +648,11 @@ func (m AppModel) handleTrackLoaded(msg trackLoadedMsg) (tea.Model, tea.Cmd) {
 func (m AppModel) togglePlayback() (tea.Model, tea.Cmd) {
 	switch m.state {
 	case StatePlaying:
-		m.Audio.ctrl.Paused, m.state = true, StatePaused
+		m.Audio.Pause()
+		m.state = StatePaused
 	case StatePaused:
-		m.Audio.ctrl.Paused, m.state = false, StatePlaying
+		m.Audio.Resume()
+		m.state = StatePlaying
 		return m, m.tick()
 	case StateStopped:
 		return m.playCurrent()
@@ -709,11 +725,17 @@ func (m *AppModel) adjustVolume(delta float64) {
 }
 
 func (m *AppModel) seekTo(position time.Duration) {
+	// Limitar la posición antes de solicitarla al motor de audio: los
+	// decodificadores subyacentes devuelven un error si se les pide una
+	// posición negativa o posterior al final de la pista, lo que antes
+	// disparaba una pantalla de "CRITICAL ERROR" al rebobinar cerca del
+	// inicio o avanzar cerca del final de una canción.
+	position = clampDuration(position, 0, m.totalTime)
 	if err := m.Audio.Seek(position); err != nil {
 		m.lastError = err
 		return
 	}
-	m.elapsed = clampDuration(position, 0, m.totalTime)
+	m.elapsed = position
 }
 
 func (m *AppModel) seekForward(seconds int) { m.seekTo(m.elapsed + time.Duration(seconds)*time.Second) }
