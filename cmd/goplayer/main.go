@@ -23,8 +23,8 @@ func main() {
 		}
 	}
 
-	model := player.NewAppModel(*dirFlag)
-	defer model.Audio.Close()
+	model := player.NewRootModel(*dirFlag)
+	defer model.Close()
 
 	// Iniciar el programa Bubble Tea con pantalla alternativa.
 	if _, err := tea.NewProgram(model, tea.WithAltScreen()).Run(); err != nil {
