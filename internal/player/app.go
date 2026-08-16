@@ -187,11 +187,10 @@ func (m AppModel) loadTrackCmd(track Track) tea.Cmd {
 	}
 }
 
-func (m *AppModel) loadBrowserDir(target string) {
+func (m *AppModel) loadBrowserDir(target string) tea.Cmd {
 	entries, err := os.ReadDir(target)
 	if err != nil {
-		m.lastError = err
-		return
+		return func() tea.Msg { return errorMsg{err} }
 	}
 
 	m.browserPath = target
@@ -229,6 +228,7 @@ func (m *AppModel) loadBrowserDir(target string) {
 
 	m.browserEntries = append(dirs, files...)
 	m.browserCursor = 0
+	return nil
 }
 
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -276,8 +276,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if initial == "" {
 			initial = "."
 		}
-		m.loadBrowserDir(initial)
-		return m, nil
+		cmd := m.loadBrowserDir(initial)
+		return m, cmd
 
 	case trackLoadedMsg:
 		return m.handleTrackLoaded(msg)
@@ -326,13 +326,15 @@ func (m AppModel) handleBrowserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.browserCursor = min(len(m.browserEntries)-1, m.browserCursor+1)
 	case "left", "backspace":
 		parent := filepath.Dir(m.browserPath)
-		m.loadBrowserDir(parent)
+		cmd := m.loadBrowserDir(parent)
+		return m, cmd
 	case "right", "enter":
 		if len(m.browserEntries) > 0 {
 			selected := m.browserEntries[m.browserCursor]
 			if selected.isDir {
 				newPath := filepath.Join(m.browserPath, selected.name)
-				m.loadBrowserDir(newPath)
+				cmd := m.loadBrowserDir(newPath)
+				return m, cmd
 			}
 		}
 	case " ":
@@ -574,8 +576,8 @@ func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if initialDir == "" {
 			initialDir = "."
 		}
-		m.loadBrowserDir(initialDir)
-		return m, nil
+		cmd := m.loadBrowserDir(initialDir)
+		return m, cmd
 	case " ":
 		return m.togglePlayback()
 	case "n":
@@ -597,11 +599,11 @@ func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "m":
 		m.Audio.ToggleMute()
 	case "0":
-		m.seekTo(0)
+		return m, m.seekTo(0)
 	case ".", ">":
-		m.seekForward(seekSeconds)
+		return m, m.seekForward(seekSeconds)
 	case ",", "<":
-		m.seekBackward(seekSeconds)
+		return m, m.seekBackward(seekSeconds)
 	case "s":
 		m.playlist.ToggleShuffle()
 	case "r":
@@ -626,6 +628,7 @@ func (m AppModel) handleTrackLoaded(msg trackLoadedMsg) (tea.Model, tea.Cmd) {
 	m.Audio.sessionID++
 	sessionID := m.Audio.sessionID
 	m.Audio.cancelChan = make(chan struct{})
+	cancelChan := m.Audio.cancelChan
 
 	done := m.Audio.Play()
 	m.state = StatePlaying
@@ -638,7 +641,7 @@ func (m AppModel) handleTrackLoaded(msg trackLoadedMsg) (tea.Model, tea.Cmd) {
 		select {
 		case <-done:
 			return playbackEndedMsg{sessionID: sessionID}
-		case <-m.Audio.cancelChan:
+		case <-cancelChan:
 			return nil
 		}
 	}
@@ -678,8 +681,8 @@ func (m AppModel) playNext() (tea.Model, tea.Cmd) {
 
 func (m AppModel) playPrevious() (tea.Model, tea.Cmd) {
 	if m.elapsed > 3*time.Second {
-		m.seekTo(0)
-		return m, nil
+		cmd := m.seekTo(0)
+		return m, cmd
 	}
 	if track, ok := m.playlist.Previous(); ok {
 		m.cursorIndex = m.playlist.current
@@ -724,7 +727,7 @@ func (m *AppModel) adjustVolume(delta float64) {
 	m.Audio.SetVolume(m.volumeLevel)
 }
 
-func (m *AppModel) seekTo(position time.Duration) {
+func (m *AppModel) seekTo(position time.Duration) tea.Cmd {
 	// Limitar la posición antes de solicitarla al motor de audio: los
 	// decodificadores subyacentes devuelven un error si se les pide una
 	// posición negativa o posterior al final de la pista, lo que antes
@@ -732,16 +735,18 @@ func (m *AppModel) seekTo(position time.Duration) {
 	// inicio o avanzar cerca del final de una canción.
 	position = clampDuration(position, 0, m.totalTime)
 	if err := m.Audio.Seek(position); err != nil {
-		m.lastError = err
-		return
+		return func() tea.Msg { return errorMsg{err} }
 	}
 	m.elapsed = position
+	return nil
 }
 
-func (m *AppModel) seekForward(seconds int) { m.seekTo(m.elapsed + time.Duration(seconds)*time.Second) }
+func (m *AppModel) seekForward(seconds int) tea.Cmd {
+	return m.seekTo(m.elapsed + time.Duration(seconds)*time.Second)
+}
 
-func (m *AppModel) seekBackward(seconds int) {
-	m.seekTo(m.elapsed - time.Duration(seconds)*time.Second)
+func (m *AppModel) seekBackward(seconds int) tea.Cmd {
+	return m.seekTo(m.elapsed - time.Duration(seconds)*time.Second)
 }
 
 func (m *AppModel) resetPlayback() {

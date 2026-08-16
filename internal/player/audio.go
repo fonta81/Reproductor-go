@@ -143,67 +143,73 @@ func (ae *AudioEngine) Stop() {
 		_ = ae.streamer.Close()
 		ae.streamer = nil
 	}
+	speaker.Lock()
 	ae.ctrl = nil
 	ae.volume = nil
+	speaker.Unlock()
 }
 
-// Pause pausa la reproducción actual. Usa speaker.Lock/Unlock, tal como
-// requiere beep.Ctrl, para evitar condiciones de carrera con la goroutine
-// de audio que llama a Stream() concurrentemente.
+// Pause pausa la reproducción actual de forma segura.
 func (ae *AudioEngine) Pause() {
+	speaker.Lock()
+	defer speaker.Unlock()
 	if ae.ctrl == nil {
 		return
 	}
-	speaker.Lock()
 	ae.ctrl.Paused = true
-	speaker.Unlock()
 }
 
 // Resume reanuda la reproducción previamente pausada de forma segura.
 func (ae *AudioEngine) Resume() {
+	speaker.Lock()
+	defer speaker.Unlock()
 	if ae.ctrl == nil {
 		return
 	}
-	speaker.Lock()
 	ae.ctrl.Paused = false
-	speaker.Unlock()
 }
 
-// SetVolume ajusta el volumen del motor de audio.
+// SetVolume ajusta el volumen del motor de audio de forma segura.
 func (ae *AudioEngine) SetVolume(level float64) {
+	speaker.Lock()
+	defer speaker.Unlock()
 	if ae.volume == nil {
 		return
 	}
-	speaker.Lock()
 	ae.volume.Volume = level
-	speaker.Unlock()
 }
 
-// ToggleMute alterna el estado de silencio.
+// ToggleMute alterna el estado de silencio de forma segura.
 func (ae *AudioEngine) ToggleMute() {
+	speaker.Lock()
+	defer speaker.Unlock()
 	if ae.volume == nil {
 		return
 	}
-	speaker.Lock()
 	ae.volume.Silent = !ae.volume.Silent
-	speaker.Unlock()
 }
 
-// IsMuted devuelve verdadero si el audio está silenciado.
+// IsMuted devuelve verdadero si el audio está silenciado de forma segura.
 func (ae *AudioEngine) IsMuted() bool {
+	speaker.Lock()
+	defer speaker.Unlock()
 	return ae.volume != nil && ae.volume.Silent
 }
 
-// Position devuelve la posición actual de reproducción.
+// Position devuelve la posición actual de reproducción de forma segura.
 func (ae *AudioEngine) Position() time.Duration {
+	speaker.Lock()
+	defer speaker.Unlock()
 	if ae.streamer != nil {
 		return ae.format.SampleRate.D(ae.streamer.Position())
 	}
 	return 0
 }
 
-// Seek mueve la posición de reproducción a una duración específica.
+// Seek mueve la posición de reproducción a una duración específica de forma segura.
 func (ae *AudioEngine) Seek(position time.Duration) error {
+	speaker.Lock()
+	defer speaker.Unlock()
 	if ae.streamer == nil {
 		return fmt.Errorf("no hay stream activo")
 	}
@@ -213,12 +219,8 @@ func (ae *AudioEngine) Seek(position time.Duration) error {
 		return fmt.Errorf("formato no permite seek")
 	}
 
-	samples := int(position.Seconds()) * int(ae.format.SampleRate)
-
-	speaker.Lock()
-	err := seeker.Seek(samples)
-	speaker.Unlock()
-	if err != nil {
+	samples := ae.format.SampleRate.N(position)
+	if err := seeker.Seek(samples); err != nil {
 		return fmt.Errorf("seek fallido: %w", err)
 	}
 	return nil
