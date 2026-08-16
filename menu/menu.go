@@ -82,9 +82,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selected == "Salir" {
 				return m, tea.Quit
 			}
+			return m, func() tea.Msg {
+				return SelectMsg{Choice: m.selected}
+			}
 		}
 	}
 	return m, nil
+}
+
+type SelectMsg struct {
+	Choice string
 }
 
 func (m Model) View() string {
