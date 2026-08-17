@@ -330,10 +330,23 @@ func (m AppModel) handleBrowserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		m.browserCursor = min(len(m.browserEntries)-1, m.browserCursor+1)
 	case "left", "backspace":
-		parent := filepath.Dir(m.browserPath)
-		if parent == m.browserPath {
-			return m, nil // Already at root
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return m, nil // Cannot restrict without home dir
 		}
+		
+		absPath, err := filepath.Abs(m.browserPath)
+		if err != nil {
+			return m, nil
+		}
+
+		parent := filepath.Dir(absPath)
+		
+		// Ensure parent is still inside home
+		if !strings.HasPrefix(parent, home) {
+			return m, nil // Don't allow leaving home
+		}
+		
 		cmd := m.loadBrowserDir(parent)
 		return m, cmd
 	case "right", "enter":
@@ -350,7 +363,13 @@ func (m AppModel) handleBrowserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.browserEntries) > 0 {
 			selected := m.browserEntries[m.browserCursor]
 			if selected.isDir {
-				target = filepath.Join(m.browserPath, selected.name)
+				target := filepath.Join(m.browserPath, selected.name)
+				home, err := os.UserHomeDir()
+				if err == nil && !strings.HasPrefix(target, home) {
+					return m, nil // Do not allow selecting folders outside home
+				}
+				m.isPickingFolder = false
+				return m, m.scanLibraryCmd(target)
 			}
 		}
 		m.isPickingFolder = false
