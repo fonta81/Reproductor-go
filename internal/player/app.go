@@ -188,12 +188,17 @@ func (m AppModel) loadTrackCmd(track Track) tea.Cmd {
 }
 
 func (m *AppModel) loadBrowserDir(target string) tea.Cmd {
-	entries, err := os.ReadDir(target)
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		return func() tea.Msg { return errorMsg{err} }
+	}
+	
+	entries, err := os.ReadDir(absTarget)
 	if err != nil {
 		return func() tea.Msg { return errorMsg{err} }
 	}
 
-	m.browserPath = target
+	m.browserPath = absTarget
 
 	var dirs, files []browserEntry
 	for _, e := range entries {
@@ -326,6 +331,9 @@ func (m AppModel) handleBrowserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.browserCursor = min(len(m.browserEntries)-1, m.browserCursor+1)
 	case "left", "backspace":
 		parent := filepath.Dir(m.browserPath)
+		if parent == m.browserPath {
+			return m, nil // Already at root
+		}
 		cmd := m.loadBrowserDir(parent)
 		return m, cmd
 	case "right", "enter":
