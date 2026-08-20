@@ -88,7 +88,7 @@ Antes de ejecutar GoPlayer, asegúrate de tener instalado en tu sistema:
 ## Uso
 
 ### Ejecución Predeterminada
-Por defecto, GoPlayer escanea `./music`, `./songs` y la carpeta de música predeterminada de tu sistema en busca de archivos `.mp3` y `.wav`:
+Por defecto, GoPlayer escanea `./music`, `./songs` y la carpeta de música predeterminada de tu sistema en busca de archivos `.mp3`, `.wav`, `.flac` y `.ogg`. Si seleccionaste previamente un directorio a través del explorador de archivos (`o`), GoPlayer lo cargará automáticamente al inicio desde su archivo de configuración (`~/.config/goplayer/config.json`):
 
 ```bash
 go run ./cmd/goplayer

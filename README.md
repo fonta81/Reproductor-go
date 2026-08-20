@@ -89,7 +89,7 @@ Before running GoPlayer, ensure you have the following installed on your system:
 ## Usage
 
 ### Default Execution
-By default, GoPlayer scans `./music`, `./songs`, and your system's default Music folder for `.mp3` and `.wav` files:
+By default, GoPlayer scans `./music`, `./songs`, and your system's default Music folder for `.mp3`, `.wav`, `.flac`, and `.ogg` files. If you previously selected a directory via the file browser (`o`), GoPlayer will automatically load it on startup from its configuration file (`~/.config/goplayer/config.json`):
 
 ```bash
 go run ./cmd/goplayer
