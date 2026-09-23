@@ -7,10 +7,8 @@
 
   outputs = { self, nixpkgs }:
     let
-      # Define los sistemas compatibles (añade más si usas macOS u otras arquitecturas)
       supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       
-      # Genera la configuración para cada sistema
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
     in
     {
