@@ -20,11 +20,11 @@
         in
         {
           default = pkgs.mkShell {
-            buildInputs = [
-              pkgs.go
-              pkgs.gopls
-              pkgs.pkg-config
-              pkgs.alsa-lib
+            buildInputs = with pkgs; [
+              go
+              gopls
+              pkg-config
+              alsa-lib
             ];
 
             shellHook = ''
