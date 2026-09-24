@@ -11,7 +11,9 @@ GoPlayer brings a modern, sleek audio playback experience directly to your termi
 ## Key Features
 
 - **Terminal User Interface (TUI)**: Beautiful and responsive terminal interface with custom status indicators, progress bars, and track controls.
-- **Dynamic File Explorer**: Built-in visual directory picker (`o` / `ctrl+o`) allowing you to browse subfolders and change your music directory on the fly.
+- **Interactive Main Menu**: Intuitive main menu to trigger actions (Play track, Pause/Stop, Next/Previous song, Music library, Settings, Quit).
+- **Dynamic File Explorer**: Built-in visual directory picker (`o` / `ctrl+o` or via menu) allowing you to browse subfolders and change your music directory on the fly (confined securely to your user home directory).
+- **Persistent Configuration**: Automatically remembers the last selected music folder in `~/.config/goplayer/config.json`.
 - **Multiple Format Support**: Decodes and plays **MP3**, **WAV**, **FLAC**, and **OGG** audio files seamlessly.
 - **Audio Control & Engine**:
   - Fine-grained volume control with logarithmic scaling, limiter effect, and instant muting.
@@ -21,11 +23,10 @@ GoPlayer brings a modern, sleek audio playback experience directly to your termi
   - Ability to remove individual tracks from the active session.
 - **Metadata Extraction**: Automatically extracts **Title**, **Artist**, and **Album** metadata from audio tags.
 - **Quick Filter**: Press `Ctrl+F` to open an inline fuzzy/substring search bar that filters the playlist by Title or Artist in real time. Navigate matches with ↑/↓ or j/k, press `Enter` to play the highlighted track, and `Esc` to clear/close the filter.
-
 - **Playback Modes**:
   - **Shuffle**: Randomized playlist order.
   - **Repeat Modes**: Repeat Off, Repeat One (single track), or Repeat All (entire playlist).
-- **Graceful Fallbacks & Auto-Scanning**: Automatically scans local folders (`./music`, `./songs`, `~/Music`, `~/Música`) or accepts a custom command-line directory flag.
+- **Graceful Fallbacks & Auto-Scanning**: Automatically scans local folders (`./music`, `./songs`, `~/Music`, `~/Música`), user config, or accepts a custom command-line directory flag.
 
 ---
 
@@ -36,13 +37,19 @@ GoPlayer brings a modern, sleek audio playback experience directly to your termi
 ├── cmd
 │   └── goplayer
 │       └── main.go       # Entry point
-└── internal
-    └── player
-        ├── app.go        # UI/Application model
-        ├── audio.go      # Audio engine
-        ├── constants.go  # Constants & Styles
-        ├── models.go     # Data structures
-        └── utils.go      # Helper functions
+├── internal
+│   └── player
+│       ├── app.go        # UI/Application model for the player
+│       ├── audio.go      # Audio engine (Beep)
+│       ├── config.go     # Persistent configuration management
+│       ├── constants.go  # Colors, constants & styles
+│       ├── models.go     # Data structures (Track, Playlist, etc.)
+│       ├── root.go       # Screen router (Menu <-> Player)
+│       └── utils.go      # Helper functions & metadata extraction
+├── menu
+│   └── menu.go           # Main menu TUI model
+├── flake.nix             # Nix development environment flake
+└── flake.lock
 ```
 
 ---
@@ -54,8 +61,9 @@ GoPlayer brings a modern, sleek audio playback experience directly to your termi
 - **Frameworks & Libraries**:
   - [Charm Bubble Tea](https://github.com/charmbracelet/bubbletea) — TUI framework based on Elm.
   - [Charm Lipgloss](https://github.com/charmbracelet/lipgloss) — Style definitions and terminal layouts.
-  - [Charm Bubbles Progress](https://github.com/charmbracelet/bubbles) — Progress bar component.
+  - [Charm Bubbles Progress & TextInput](https://github.com/charmbracelet/bubbles) — Progress bar and input components.
   - [Faiface Beep](https://github.com/faiface/beep) — Audio library for Go (decoding, resampling, volume control, and audio playback).
+- **Development Environment**: [Nix Flakes](https://nixos.wiki/wiki/Flakes) (provides Go, gopls, pkg-config, alsa-lib).
 
 ---
 
@@ -64,9 +72,13 @@ GoPlayer brings a modern, sleek audio playback experience directly to your termi
 Before running GoPlayer, ensure you have the following installed on your system:
 
 - **Go** (version 1.22 or higher recommended for modern range syntax)
+- System audio development libraries (e.g. `alsa-lib` / `pkg-config` on Linux if building with CGO audio backends). Alternatively, use **Nix**.
 
+---
 
 ## Installation & Setup
+
+### Standard Setup
 
 1. **Clone the repository**:
    ```bash
@@ -78,18 +90,27 @@ Before running GoPlayer, ensure you have the following installed on your system:
    ```bash
    go mod tidy
    ```
-3. **Run the code**:
 
+3. **Run the application**:
    ```bash
    go run ./cmd/goplayer
    ```
+
+### Using Nix Flake
+
+If you use Nix with flakes enabled:
+
+```bash
+nix develop
+go run ./cmd/goplayer
+```
 
 ---
 
 ## Usage
 
 ### Default Execution
-By default, GoPlayer scans `./music`, `./songs`, and your system's default Music folder for `.mp3`, `.wav`, `.flac`, and `.ogg` files. If you previously selected a directory via the file browser (`o`), GoPlayer will automatically load it on startup from its configuration file (`~/.config/goplayer/config.json`):
+When started, GoPlayer displays the main menu. It scans `./music`, `./songs`, the system's default Music folder, or the directory saved in `~/.config/goplayer/config.json`:
 
 ```bash
 go run ./cmd/goplayer
@@ -106,7 +127,15 @@ go run ./cmd/goplayer -dir /path/to/your/music
 
 ## Keybindings & Controls
 
-### Playback
+### Main Menu
+| Key | Action |
+| :--- | :--- |
+| `↑` / `k` | Move selection up |
+| `↓` / `j` | Move selection down |
+| `Enter` / `Space` | Select menu option |
+| `q` / `Ctrl+C` | Quit |
+
+### Playback Screen
 | Key | Action |
 | :--- | :--- |
 | `Space` | Toggle Play / Pause |
@@ -126,6 +155,7 @@ go run ./cmd/goplayer -dir /path/to/your/music
 | `l` | Toggle visibility of queue panel |
 | `o` / `Ctrl+O` | Open visual directory browser |
 | `Ctrl+F` | Open quick fuzzy/substring filter (search Title or Artist) |
+| `Esc` | Return to Main Menu (when not in filter or directory browser) |
 
 ### Audio & Modes
 | Key | Action |
@@ -141,10 +171,18 @@ go run ./cmd/goplayer -dir /path/to/your/music
 | :--- | :--- |
 | `↑` / `k` | Move cursor up |
 | `↓` / `j` | Move cursor down |
-| `←` / `Backspace` | Navigate to parent directory |
+| `←` / `Backspace` | Navigate to parent directory (within `$HOME`) |
 | `→` / `Enter` | Open selected directory |
 | `Space` | Confirm and scan selected directory |
 | `Esc` / `q` | Cancel directory selection |
+
+### Quick Filter (Active Mode)
+| Key | Action |
+| :--- | :--- |
+| `↑` / `k` | Move selection up in suggestions / matches |
+| `↓` / `j` | Move selection down in suggestions / matches |
+| `Enter` | Play selected matching track and exit filter |
+| `Esc` | Cancel and close filter |
 
 ### System
 | Key | Action |
