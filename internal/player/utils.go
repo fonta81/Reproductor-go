@@ -32,6 +32,33 @@ func truncate(str string, maxLen int) string {
 	return str
 }
 
+// SupportedAudioExtensions es el mapa centralizado de extensiones de audio soportadas.
+var SupportedAudioExtensions = map[string]bool{
+	".mp3":  true,
+	".wav":  true,
+	".flac": true,
+	".ogg":  true,
+}
+
+// IsSupportedAudio devuelve true si la ruta corresponde a un formato de audio soportado.
+func IsSupportedAudio(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return SupportedAudioExtensions[ext]
+}
+
+// VolumePercentage devuelve el porcentaje de volumen normalizado entre 0.0 y 1.0.
+func VolumePercentage(level, minVal, maxVal float64) float64 {
+	if maxVal == minVal {
+		return 0.0
+	}
+	return max(0.0, min(1.0, (level-minVal)/(maxVal-minVal)))
+}
+
+// VolumePercentageInt devuelve el porcentaje de volumen como entero entre 0 y 100.
+func VolumePercentageInt(level, minVal, maxVal float64) int {
+	return int(VolumePercentage(level, minVal, maxVal) * 100)
+}
+
 // ExtractMetadata intenta extraer metadatos de un archivo de audio.
 // Si falla o faltan campos, usa valores predeterminados basados en el nombre del archivo.
 func ExtractMetadata(path string) Track {
@@ -74,11 +101,12 @@ func renderVolumeBar(level, minVal, maxVal float64, muted bool) string {
 	if muted {
 		return lipgloss.NewStyle().Foreground(red).Bold(true).Render(iconMute + " MUTE")
 	}
+
+	pct := VolumePercentage(level, minVal, maxVal)
 	if maxVal == minVal {
 		return fmt.Sprintf("%s ░░░░░░░░░░ 0%%", iconVolume)
 	}
 
-	pct := max(0.0, min(1.0, (level-minVal)/(maxVal-minVal)))
 	filled := int(pct * 10)
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", 10-filled)
 
@@ -108,14 +136,11 @@ func IsMusicDir(path string) bool {
 		if d.IsDir() {
 			return nil
 		}
-		ext := strings.ToLower(filepath.Ext(d.Name()))
-		switch ext {
-		case ".mp3", ".wav", ".flac", ".ogg":
+		if IsSupportedAudio(d.Name()) {
 			found = true
 			return errors.New("found")
-		default:
-			return nil
 		}
+		return nil
 	})
 	if walkErr != nil && walkErr.Error() == "found" {
 		return true

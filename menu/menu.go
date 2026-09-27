@@ -227,36 +227,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			idx := int(msg.Runes[0] - '1')
 			if idx >= 0 && idx < len(items) {
 				m.cursor = idx
-				selected := items[idx]
-				m.selected = selected.label
-				if selected.action == ActionQuit {
-					return m, tea.Quit
-				}
-				return m, func() tea.Msg {
-					return SelectMsg{
-						Action: selected.action,
-						Choice: selected.label,
-					}
-				}
+				return m.handleSelection(items[idx])
 			}
 
 		case "enter", " ":
 			if m.cursor >= 0 && m.cursor < len(items) {
-				selected := items[m.cursor]
-				m.selected = selected.label
-				if selected.action == ActionQuit {
-					return m, tea.Quit
-				}
-				return m, func() tea.Msg {
-					return SelectMsg{
-						Action: selected.action,
-						Choice: selected.label,
-					}
-				}
+				return m.handleSelection(items[m.cursor])
 			}
 		}
 	}
 	return m, nil
+}
+
+// handleSelection centraliza la lógica de despacho al seleccionar un ítem del menú.
+func (m Model) handleSelection(item menuItem) (tea.Model, tea.Cmd) {
+	m.selected = item.label
+	if item.action == ActionQuit {
+		return m, tea.Quit
+	}
+	return m, func() tea.Msg {
+		return SelectMsg{
+			Action: item.action,
+			Choice: item.label,
+		}
+	}
 }
 
 func (m Model) renderNowPlayingCard() string {
@@ -295,20 +289,13 @@ func (m Model) renderNowPlayingCard() string {
 	b.WriteString(cardHeaderStyle.Render(statusBadge) + "\n")
 
 	if m.state.HasTrack && m.state.CurrentTrackTitle != "" {
-		title := m.state.CurrentTrackTitle
-		if len(title) > 48 {
-			title = title[:45] + "..."
-		}
-		b.WriteString(trackTitleStyle.Render("🎵 " + title) + "\n")
+		b.WriteString(trackTitleStyle.Render("🎵 "+truncateText(m.state.CurrentTrackTitle, 45)) + "\n")
 
 		artist := m.state.CurrentTrackArtist
 		if artist == "" {
 			artist = "Artista desconocido"
 		}
-		if len(artist) > 48 {
-			artist = artist[:45] + "..."
-		}
-		b.WriteString(trackArtistStyle.Render("👤 " + artist) + "\n")
+		b.WriteString(trackArtistStyle.Render("👤 "+truncateText(artist, 45)) + "\n")
 	} else {
 		if m.state.TrackCount == 0 {
 			b.WriteString(metaInfoStyle.Render("Sin pistas en biblioteca. Pulsa [5] o [6] para explorar carpetas.") + "\n")
@@ -320,6 +307,16 @@ func (m Model) renderNowPlayingCard() string {
 	b.WriteString(footerMeta)
 
 	return cardStyle.Copy().BorderForeground(borderColor).Render(b.String())
+}
+
+// truncateText recorta una cadena a maxLen runas, añadiendo "..." si es necesario.
+// Opera sobre runas para evitar cortes en medio de caracteres multibyte.
+func truncateText(str string, maxLen int) string {
+	runes := []rune(str)
+	if len(runes) > maxLen {
+		return string(runes[:maxLen-3]) + "..."
+	}
+	return str
 }
 
 func (m Model) View() string {

@@ -153,8 +153,7 @@ func (m AppModel) scanLibraryCmd(targetDir string) tea.Cmd {
 					return nil
 				}
 
-				ext := strings.ToLower(filepath.Ext(d.Name()))
-				if ext != ".mp3" && ext != ".wav" && ext != ".flac" && ext != ".ogg" {
+				if !IsSupportedAudio(d.Name()) {
 					return nil
 				}
 
@@ -218,8 +217,7 @@ func (m *AppModel) loadBrowserDir(target string) tea.Cmd {
 			continue
 		}
 
-		ext := strings.ToLower(filepath.Ext(name))
-		if ext == ".mp3" || ext == ".wav" {
+		if IsSupportedAudio(name) {
 			files = append(files, browserEntry{name: name, isDir: false})
 		}
 	}
@@ -234,6 +232,15 @@ func (m *AppModel) loadBrowserDir(target string) tea.Cmd {
 	m.browserEntries = append(dirs, files...)
 	m.browserCursor = 0
 	return nil
+}
+
+// openBrowser activa el explorador de carpetas apuntando a dir (o "." si está vacío).
+func (m *AppModel) openBrowser(dir string) tea.Cmd {
+	m.isPickingFolder = true
+	if dir == "" {
+		dir = "."
+	}
+	return m.loadBrowserDir(dir)
 }
 
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -276,12 +283,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case noMusicFoundMsg:
 		// Abrir el navegador para que el usuario seleccione una carpeta con pistas
 		m.lastError = nil
-		m.isPickingFolder = true
-		initial := msg.dir
-		if initial == "" {
-			initial = "."
-		}
-		cmd := m.loadBrowserDir(initial)
+		cmd := m.openBrowser(msg.dir)
 		return m, cmd
 
 	case trackLoadedMsg:
@@ -463,14 +465,10 @@ func (m *AppModel) rebuildFilteredIndices() {
 		return
 	}
 
-	// Build display candidates ("Artist — Title" or Title when Artist missing)
+	// Build display candidates usando DisplayName() para evitar duplicación de lógica
 	cands := make([]string, 0, m.playlist.Length())
 	for _, t := range m.playlist.tracks {
-		if t.Artist == "" {
-			cands = append(cands, t.Title)
-		} else {
-			cands = append(cands, t.Artist+" — "+t.Title)
-		}
+		cands = append(cands, t.DisplayName())
 	}
 
 	type pair struct {
@@ -558,6 +556,21 @@ func (m AppModel) renderFilterBar() string {
 	return lipgloss.JoinHorizontal(lipgloss.Left, bar, lipgloss.NewStyle().Foreground(comment).Render(summary))
 }
 
+// renderTrackRow construye y pinta una fila de pista con cursor, número, título truncado,
+// duración y el estilo adecuado según si es la pista actual o la destacada.
+func renderTrackRow(cursor string, index int, track Track, isCurrent, isHighlighted bool, titleWidth int) string {
+	style := lipgloss.NewStyle()
+	if isCurrent {
+		style = style.Bold(true).Foreground(pink)
+	} else if isHighlighted {
+		style = style.Foreground(cyan)
+	} else {
+		style = style.Foreground(foreground)
+	}
+	row := fmt.Sprintf("%s%d. %-*s [%s]", cursor, index+1, titleWidth, truncate(track.DisplayName(), titleWidth), track.FormattedDuration())
+	return "  " + style.Render(row) + "\n"
+}
+
 // renderSuggestions renders the compact list of top suggestions computed from
 // the current filtered results. The suggestion list highlights the selected
 // suggestion and marks the currently playing track.
@@ -576,18 +589,7 @@ func (m AppModel) renderSuggestions() string {
 		if i == m.suggestionCursor {
 			cursor = "→  "
 		}
-		row := fmt.Sprintf("%s%d. %-40s [%s]", cursor, idx+1, truncate(t.DisplayName(), 40), t.FormattedDuration())
-		style := lipgloss.NewStyle()
-		if idx == m.playlist.current {
-			style = style.Bold(true).Foreground(pink)
-		} else if i == m.suggestionCursor {
-			style = style.Foreground(cyan)
-		} else {
-			style = style.Foreground(foreground)
-		}
-		b.WriteString("  ")
-		b.WriteString(style.Render(row))
-		b.WriteString("\n")
+		b.WriteString(renderTrackRow(cursor, idx, t, idx == m.playlist.current, i == m.suggestionCursor, 40))
 	}
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(selection).Padding(0, 1).MarginLeft(2).Render(b.String())
 }
@@ -598,12 +600,7 @@ func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.Audio.Close()
 		return m, tea.Quit
 	case "o", "ctrl+o":
-		m.isPickingFolder = true
-		initialDir := m.musicDir
-		if initialDir == "" {
-			initialDir = "."
-		}
-		cmd := m.loadBrowserDir(initialDir)
+		cmd := m.openBrowser(m.musicDir)
 		return m, cmd
 	case " ":
 		return m.togglePlayback()
@@ -912,20 +909,7 @@ func (m AppModel) renderPlaylistPanel() string {
 			if idx == m.filterCursor {
 				cursor = "→  "
 			}
-
-			style := lipgloss.NewStyle()
-			if i == m.playlist.current {
-				style = style.Bold(true).Foreground(pink)
-			} else if idx == m.filterCursor {
-				style = style.Foreground(cyan)
-			} else {
-				style = style.Foreground(foreground)
-			}
-
-			row := fmt.Sprintf("%s%d. %-35s [%s]", cursor, i+1, truncate(t.DisplayName(), 35), t.FormattedDuration())
-			builder.WriteString("  ")
-			builder.WriteString(style.Render(row))
-			builder.WriteString("\n")
+			builder.WriteString(renderTrackRow(cursor, i, t, i == m.playlist.current, idx == m.filterCursor, 35))
 		}
 
 		if end < len(m.filteredIndices) {
@@ -949,21 +933,7 @@ func (m AppModel) renderPlaylistPanel() string {
 		if i == m.cursorIndex {
 			cursor = "→  "
 		}
-
-		style := lipgloss.NewStyle()
-		switch i {
-		case m.playlist.current:
-			style = style.Bold(true).Foreground(pink)
-		case m.cursorIndex:
-			style = style.Foreground(cyan)
-		default:
-			style = style.Foreground(foreground)
-		}
-
-		row := fmt.Sprintf("%s%d. %-35s [%s]", cursor, i+1, truncate(t.DisplayName(), 35), t.FormattedDuration())
-		builder.WriteString("  ")
-		builder.WriteString(style.Render(row))
-		builder.WriteString("\n")
+		builder.WriteString(renderTrackRow(cursor, i, t, i == m.playlist.current, i == m.cursorIndex, 35))
 	}
 
 	if end < m.playlist.Length() {

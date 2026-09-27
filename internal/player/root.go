@@ -35,16 +35,7 @@ func (r *RootModel) syncMenuState() {
 	}
 
 	// Calcular volumen en porcentaje 0-100%
-	var volPct int
-	if maxVolume != minVolume {
-		pct := (r.playerModel.volumeLevel - minVolume) / (maxVolume - minVolume)
-		if pct < 0 {
-			pct = 0
-		} else if pct > 1 {
-			pct = 1
-		}
-		volPct = int(pct * 100)
-	}
+	volPct := VolumePercentageInt(r.playerModel.volumeLevel, minVolume, maxVolume)
 
 	isMuted := false
 	if r.playerModel.Audio != nil {
@@ -160,13 +151,8 @@ func (r RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case menu.ActionSettings:
 			r.currentScreen = ScreenPlayer
-			r.playerModel.isPickingFolder = true
 			r.playerModel.isFiltering = false
-			initialDir := r.playerModel.musicDir
-			if initialDir == "" {
-				initialDir = "."
-			}
-			cmd := r.playerModel.loadBrowserDir(initialDir)
+			cmd := r.playerModel.openBrowser(r.playerModel.musicDir)
 			r.syncMenuState()
 			return r, cmd
 
