@@ -194,4 +194,4 @@ go run ./cmd/goplayer -dir /ruta/a/tu/musica
 
 ## Licencia
 
-Este proyecto está bajo la Licencia MIT.
+Este proyecto está bajo la [Licencia MIT](LICENSE).

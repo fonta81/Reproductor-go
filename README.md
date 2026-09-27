@@ -194,4 +194,4 @@ go run ./cmd/goplayer -dir /path/to/your/music
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the [MIT License](LICENSE).
