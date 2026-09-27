@@ -1,6 +1,6 @@
 # GoPlayer
 
-[Read in Spanish](readme.es.md)
+[Read in Spanish](README.es.md)
 
 > A feature-rich, terminal-based User Interface (TUI) music player written in Go, powered by **Bubble Tea**, **Lipgloss**, and **Beep**.
 
