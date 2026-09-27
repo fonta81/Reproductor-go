@@ -953,7 +953,7 @@ func (m AppModel) renderBrowserPanel() string {
 	builder.WriteString("\n\n")
 
 	if len(m.browserEntries) == 0 {
-		builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  (Directorio vacío, sin subcarpetas ni pistas .mp3/.wav)\n"))
+		builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  (Directorio vacío, sin subcarpetas ni pistas de audio)\n"))
 	}
 
 	start := max(0, m.browserCursor-5)
