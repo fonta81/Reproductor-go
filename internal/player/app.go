@@ -1,5 +1,5 @@
-// Package player provides the core functionality for the audio playback application,
-// including UI management, audio processing, and state handling.
+// Package player proporciona la interfaz de usuario basada en terminal (TUI) con Bubble Tea,
+// la gestión de eventos de teclado, escaneo de biblioteca y control del reproductor.
 package player
 
 import (
@@ -11,73 +11,79 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
-
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Mensajes de la aplicación para el modelo de Bubble Tea.
+// Tipos de mensaje internos utilizados por la arquitectura Elm de Bubble Tea.
 type (
+	// trackLoadedMsg se emite cuando un archivo de audio se decodifica y carga correctamente en el motor.
 	trackLoadedMsg struct {
 		track    Track
 		duration time.Duration
 	}
-	playbackEndedMsg  struct{ sessionID int }
-	tickMsg           time.Time
+	// playbackEndedMsg se emite al terminar la reproducción del stream; sessionID evita procesar eventos antiguos.
+	playbackEndedMsg struct{ sessionID int }
+	// tickMsg se emite periódicamente para refrescar el tiempo transcurrido y la barra de progreso en la UI.
+	tickMsg time.Time
+	// libraryScannedMsg se emite tras completar el escaneo recursivo de un directorio musical.
 	libraryScannedMsg struct {
 		tracks []Track
 		dir    string
 	}
-	// noMusicFoundMsg se envía cuando un escaneo no devuelve pistas; abre el explorador.
+	// noMusicFoundMsg se emite cuando un escaneo no encuentra canciones compatibles; activa el explorador de carpetas.
 	noMusicFoundMsg struct{ dir string }
-	errorMsg        struct{ err error }
+	// errorMsg encapsula un error en tiempo de ejecución para mostrarlo temporalmente al usuario.
+	errorMsg struct{ err error }
 )
 
-// AppModel es el modelo principal de la aplicación que gestiona el estado del reproductor.
+// AppModel es el modelo central de Bubble Tea que gestiona el estado del reproductor,
+// las interacciones de usuario, la interfaz TUI y la integración con el motor de audio.
 type AppModel struct {
-	playlist *Playlist
-	Audio    *AudioEngine
+	playlist *Playlist    // Lista de reproducción con control secuencial y aleatorio
+	Audio    *AudioEngine // Motor de reproducción de bajo nivel
 
-	state       PlaybackState
-	elapsed     time.Duration
-	totalTime   time.Duration
-	cursorIndex int
-	volumeLevel float64
-	lastError   error
+	state       PlaybackState // Estado de reproducción (detenido, reproduciendo, pausado)
+	elapsed     time.Duration // Tiempo reproducido de la pista actual
+	totalTime   time.Duration // Duración total de la pista actual
+	cursorIndex int           // Posición del cursor en la lista de canciones
+	volumeLevel float64       // Nivel de ganancia en decibelios (dB)
+	lastError   error         // Último error capturado para la pantalla de alerta
 
-	width       int
-	height      int
-	progressBar progress.Model
-	showHelp    bool
-	showQueue   bool
+	width       int            // Ancho actual del terminal
+	height      int            // Alto actual del terminal
+	progressBar progress.Model // Componente visual de la barra de progreso
+	showHelp    bool           // Indica si se debe mostrar el panel de atajos de teclado
+	showQueue   bool           // Indica si se debe mostrar la cola de pistas
 
-	// Características de carga dinámica de directorios
-	musicDir        string
-	isPickingFolder bool
-	browserPath     string
-	browserEntries  []browserEntry
-	browserCursor   int
+	// Explorador interactivo de directorios
+	musicDir        string         // Directorio de música actualmente configurado
+	isPickingFolder bool           // Indica si el explorador de carpetas está en primer plano
+	browserPath     string         // Ruta del directorio explorado en tiempo real
+	browserEntries  []browserEntry // Elementos (carpetas y pistas compatibles) en browserPath
+	browserCursor   int            // Posición del cursor en el explorador de carpetas
 
-	// Quick filter / fuzzy search
-	isFiltering     bool
-	filterInput     textinput.Model
-	filterQuery     string
-	filteredIndices []int // indices into playlist.tracks
-	filterCursor    int   // position within filteredIndices
-	// Suggestions list
-	suggestionLimit   int
-	suggestionIndices []int // top-N indices from filteredIndices
-	suggestionCursor  int   // selected suggestion index
+	// Búsqueda y filtrado rápido difuso (fuzzy filter)
+	isFiltering     bool            // Indica si el campo de búsqueda rápida está activo
+	filterInput     textinput.Model // Componente de entrada de texto interactivo
+	filterQuery     string          // Texto ingresado por el usuario para filtrar
+	filteredIndices []int           // Índices de playlist.tracks que coinciden con la búsqueda
+	filterCursor    int             // Posición del cursor dentro de filteredIndices
+
+	// Lista de sugerencias destacadas para la búsqueda rápida
+	suggestionLimit   int   // Límite máximo de sugerencias simultáneas a mostrar
+	suggestionIndices []int // Índices de las mejores sugerencias calculadas
+	suggestionCursor  int   // Índice de la sugerencia seleccionada en la lista emergente
 }
 
-// browserEntry representa una entrada en el navegador de archivos.
+// browserEntry representa un elemento individual (directorio o archivo de audio) en el explorador.
 type browserEntry struct {
-	name  string
-	isDir bool
+	name  string // Nombre del archivo o subdirectorio
+	isDir bool   // True si el elemento es un directorio; false si es un archivo de audio
 }
 
-// NewAppModel crea e inicializa una nueva instancia de AppModel.
+// NewAppModel construye e inicializa una nueva instancia de AppModel con valores predeterminados.
 func NewAppModel(initialDir string) AppModel {
 	bar := progress.New(progress.WithDefaultGradient())
 	bar.Width = progressWidth
@@ -102,14 +108,14 @@ func NewAppModel(initialDir string) AppModel {
 		filterQuery:     "",
 		filteredIndices: nil,
 		filterCursor:    0,
-		// suggestions
+		// Configuración de sugerencias de búsqueda
 		suggestionLimit:   6,
 		suggestionIndices: nil,
 		suggestionCursor:  0,
 	}
 }
 
-// Init inicializa la aplicación escaneando la biblioteca y iniciando el tick.
+// Init inicializa la aplicación escaneando la biblioteca y iniciando el temporizador de refresco.
 func (m AppModel) Init() tea.Cmd {
 	return tea.Batch(m.scanLibraryCmd(m.musicDir), m.tick())
 }
@@ -175,6 +181,8 @@ func (m AppModel) scanLibraryCmd(targetDir string) tea.Cmd {
 	}
 }
 
+// loadTrackCmd ejecuta un comando asíncrono que delega en el motor de audio la apertura
+// y decodificación de la pista, retornando un mensaje con su duración calculada.
 func (m AppModel) loadTrackCmd(track Track) tea.Cmd {
 	return func() tea.Msg {
 		duration, err := m.Audio.Load(track)
@@ -186,12 +194,14 @@ func (m AppModel) loadTrackCmd(track Track) tea.Cmd {
 	}
 }
 
+// loadBrowserDir lee el contenido de una ruta en disco, resuelve enlaces simbólicos
+// y agrupa las carpetas y archivos de audio compatibles ordenados alfabéticamente.
 func (m *AppModel) loadBrowserDir(target string) tea.Cmd {
 	absTarget, err := filepath.Abs(target)
 	if err != nil {
 		return func() tea.Msg { return errorMsg{err} }
 	}
-	
+
 	entries, err := os.ReadDir(absTarget)
 	if err != nil {
 		return func() tea.Msg { return errorMsg{err} }
@@ -236,6 +246,7 @@ func (m *AppModel) loadBrowserDir(target string) tea.Cmd {
 
 // openBrowser activa el explorador de carpetas apuntando a dir (o "." si está vacío).
 func (m *AppModel) openBrowser(dir string) tea.Cmd {
+
 	m.isPickingFolder = true
 	if dir == "" {
 		dir = "."
@@ -334,21 +345,21 @@ func (m AppModel) handleBrowserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "left", "backspace":
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return m, nil // Cannot restrict without home dir
+			return m, nil // No es posible restringir navegación sin directorio home
 		}
-		
+
 		absPath, err := filepath.Abs(m.browserPath)
 		if err != nil {
 			return m, nil
 		}
 
 		parent := filepath.Dir(absPath)
-		
-		// Ensure parent is still inside home
+
+		// Asegurar que el directorio padre permanezca dentro de home para evitar salir del espacio de usuario
 		if !strings.HasPrefix(parent, home) {
-			return m, nil // Don't allow leaving home
+			return m, nil // No permitir salir de la carpeta personal
 		}
-		
+
 		cmd := m.loadBrowserDir(parent)
 		return m, cmd
 	case "right", "enter":
@@ -368,7 +379,7 @@ func (m AppModel) handleBrowserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				target := filepath.Join(m.browserPath, selected.name)
 				home, err := os.UserHomeDir()
 				if err == nil && !strings.HasPrefix(target, home) {
-					return m, nil // Do not allow selecting folders outside home
+					return m, nil // Evitar seleccionar carpetas fuera del directorio personal
 				}
 				m.isPickingFolder = false
 				return m, m.scanLibraryCmd(target)
@@ -380,10 +391,9 @@ func (m AppModel) handleBrowserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleFilterInput routes keys to the text input and handles filtering navigation/selection.
-// handleFilterInput processes key events while the quick-filter input is active.
-// Navigation keys move through the suggestion list (if present) or the matched results.
-// Enter selects the highlighted match and starts playback. Esc cancels filtering.
+// handleFilterInput procesa los eventos de teclado cuando el modo de búsqueda rápida está activo.
+// Permite navegar por la lista de sugerencias o resultados coincidentes, selecciona y reproduce
+// la pista destacada con Enter, o cancela la búsqueda restaurando la vista normal con Esc.
 func (m AppModel) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -394,7 +404,7 @@ func (m AppModel) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filterCursor = 0
 		return m, nil
 	case "enter":
-		// Play the currently selected filtered item (if any)
+		// Reproducir el elemento filtrado seleccionado actualmente (si existe alguno)
 		if len(m.filteredIndices) > 0 {
 			m.cursorIndex = m.filteredIndices[m.filterCursor]
 			m.isFiltering = false
@@ -402,17 +412,17 @@ func (m AppModel) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "up", "k":
-		// Move up within suggestions or filtered results
+		// Mover hacia arriba en las sugerencias o resultados filtrados
 		if len(m.suggestionIndices) > 0 {
 			m.suggestionCursor = max(0, m.suggestionCursor-1)
-			// keep filterCursor aligned to suggestion position
+			// Mantener filterCursor alineado con la posición de la sugerencia
 			m.filterCursor = m.suggestionCursor
 		} else {
 			m.filterCursor = max(0, m.filterCursor-1)
 		}
 		return m, nil
 	case "down", "j":
-		// Move down within suggestions or filtered results
+		// Mover hacia abajo en las sugerencias o resultados filtrados
 		if len(m.suggestionIndices) > 0 {
 			m.suggestionCursor = min(len(m.suggestionIndices)-1, m.suggestionCursor+1)
 			m.filterCursor = m.suggestionCursor
@@ -421,20 +431,20 @@ func (m AppModel) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	default:
-		// Delegate key handling to the text input widget, then rebuild matches
+		// Delegar el procesamiento al componente de texto y recalcular coincidencias
 		var cmd tea.Cmd
 		m.filterInput, cmd = m.filterInput.Update(msg)
 		oldQ := m.filterQuery
 		m.filterQuery = m.filterInput.Value()
 		m.rebuildFilteredIndices()
 
-		// Reset cursors if the query changed
+		// Reiniciar cursores si la consulta de búsqueda cambió
 		if m.filterQuery != oldQ {
 			m.suggestionCursor = 0
 			m.filterCursor = 0
 		}
 
-		// Clamp cursors to valid ranges
+		// Ajustar cursores dentro de los rangos válidos
 		if m.filterCursor >= len(m.filteredIndices) {
 			m.filterCursor = max(0, len(m.filteredIndices)-1)
 		}
@@ -445,16 +455,16 @@ func (m AppModel) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// rebuildFilteredIndices computes the list of matching track indices for the
-// current filter query, and prepares a small suggestion list. Matches are
-// ranked so that exact or prefix substring matches score highest; fuzzy
-// subsequence matches receive lower scores.
+// rebuildFilteredIndices calcula la lista de pistas que coinciden con el texto de búsqueda actual
+// y selecciona las mejores sugerencias. Las coincidencias se ordenan ponderando mayor puntuación
+// a coincidencias exactas o de prefijo, penalizando posiciones lejanas y aplicando coincidencia
+// difusa (fuzzy subsequence) como respaldo.
 func (m *AppModel) rebuildFilteredIndices() {
 	m.filteredIndices = make([]int, 0)
 	m.suggestionIndices = make([]int, 0)
 	q := strings.TrimSpace(m.filterQuery)
 	if q == "" {
-		// No query: include all tracks and set top-N suggestions to the first items
+		// Sin consulta: incluir todas las pistas y fijar las primeras N como sugerencias
 		for i := 0; i < m.playlist.Length(); i++ {
 			m.filteredIndices = append(m.filteredIndices, i)
 		}
@@ -465,7 +475,7 @@ func (m *AppModel) rebuildFilteredIndices() {
 		return
 	}
 
-	// Build display candidates usando DisplayName() para evitar duplicación de lógica
+	// Construir candidatos de visualización usando DisplayName() para unificar la representación
 	cands := make([]string, 0, m.playlist.Length())
 	for _, t := range m.playlist.tracks {
 		cands = append(cands, t.DisplayName())
@@ -478,27 +488,25 @@ func (m *AppModel) rebuildFilteredIndices() {
 	qLower := strings.ToLower(q)
 	pairs := make([]pair, 0, len(cands))
 
-	// Score each candidate. Prefer substring matches (earlier position and
-	// shorter strings), fallback to a weak subsequence/fuzzy score.
+	// Calcular puntaje para cada candidato: prioriza coincidencias directas y cadenas cortas,
+	// con retroceso a coincidencia difusa (subsequence)
 	for i := range cands {
 		candidate := cands[i]
 		candLower := strings.ToLower(candidate)
 
-		// Substring match: prefer earlier positions and shorter candidates
+		// Coincidencia por subcadena: premia aparición temprana y menor longitud de cadena
 		if pos := strings.Index(candLower, qLower); pos >= 0 {
 			score := 100
-			// earlier position -> higher score (reduce penalty by position)
 			score += max(0, 30-pos*2)
 			if strings.HasPrefix(candLower, qLower) {
 				score += 50
 			}
-			// prefer shorter candidates
 			score += max(0, 50-len([]rune(candLower)))
 			pairs = append(pairs, pair{idx: i, score: score})
 			continue
 		}
 
-		// Fuzzy subsequence match (weaker signal)
+		// Coincidencia difusa de subsecuencia (señal secundaria)
 		if isSubsequence(qLower, candLower) {
 			score := 30 - len([]rune(candLower))/10
 			if score < 1 {
@@ -508,23 +516,21 @@ func (m *AppModel) rebuildFilteredIndices() {
 		}
 	}
 
-	// Sort matches by descending score and extract indices
+	// Ordenar las coincidencias de mayor a menor puntuación y extraer índices
 	sort.Slice(pairs, func(a, b int) bool { return pairs[a].score > pairs[b].score })
 	for _, p := range pairs {
 		m.filteredIndices = append(m.filteredIndices, p.idx)
 	}
 
-	// Populate top-N suggestions from filtered list
+	// Extraer las primeras N mejores coincidencias para el panel de sugerencias
 	limit := min(m.suggestionLimit, len(m.filteredIndices))
 	for i := 0; i < limit; i++ {
 		m.suggestionIndices = append(m.suggestionIndices, m.filteredIndices[i])
 	}
 }
 
-// isSubsequence reports whether every rune in 'small' appears in order within
-// 'big'. It performs a single left-to-right scan and returns true for an empty
-// 'small' string (empty query matches everything). This is used as a cheap
-// fuzzy matching heuristic.
+// isSubsequence comprueba si todos los caracteres (runas) de 'small' aparecen en orden secuencial
+// dentro de 'big'. Se utiliza como heurística ligera de búsqueda difusa (fuzzy search).
 func isSubsequence(small, big string) bool {
 	if small == "" {
 		return true
@@ -543,9 +549,8 @@ func isSubsequence(small, big string) bool {
 	return false
 }
 
-// renderFilterBar builds the UI element shown when quick-filter is active.
-// It displays the text input widget and a small summary with the number of
-// matches found for the current query.
+// renderFilterBar genera el componente visual de la barra de búsqueda rápida, mostrando
+// el campo de texto interactivo junto al conteo de canciones coincidentes.
 func (m AppModel) renderFilterBar() string {
 	if !m.isFiltering {
 		return ""
@@ -571,10 +576,10 @@ func renderTrackRow(cursor string, index int, track Track, isCurrent, isHighligh
 	return "  " + style.Render(row) + "\n"
 }
 
-// renderSuggestions renders the compact list of top suggestions computed from
-// the current filtered results. The suggestion list highlights the selected
-// suggestion and marks the currently playing track.
+// renderSuggestions renderiza la caja emergente con la lista compacta de mejores sugerencias
+// calculadas a partir del filtro de búsqueda actual.
 func (m AppModel) renderSuggestions() string {
+
 	if !m.isFiltering || len(m.suggestionIndices) == 0 {
 		return ""
 	}
@@ -637,7 +642,7 @@ func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "h", "?":
 		m.showHelp = !m.showHelp
 	case "ctrl+f":
-		// Enter quick filter mode
+		// Activar modo de búsqueda rápida
 		m.isFiltering = true
 		m.filterInput.SetValue("")
 		m.filterQuery = ""
@@ -648,6 +653,8 @@ func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleTrackLoaded inicia la reproducción al recibir trackLoadedMsg, incrementa el sessionID
+// para invalidar eventos de pistas anteriores y programa una goroutine que aguarda el final de la pista.
 func (m AppModel) handleTrackLoaded(msg trackLoadedMsg) (tea.Model, tea.Cmd) {
 	m.Audio.sessionID++
 	sessionID := m.Audio.sessionID
@@ -672,6 +679,7 @@ func (m AppModel) handleTrackLoaded(msg trackLoadedMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(m.tick(), waitCmd)
 }
 
+// togglePlayback conmuta entre reproducir y pausar según el estado actual del reproductor.
 func (m AppModel) togglePlayback() (tea.Model, tea.Cmd) {
 	switch m.state {
 	case StatePlaying:
@@ -687,6 +695,7 @@ func (m AppModel) togglePlayback() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// playCurrent carga y reproduce la pista actualmente activa en la lista.
 func (m AppModel) playCurrent() (tea.Model, tea.Cmd) {
 	if track, ok := m.playlist.Current(); ok {
 		return m, m.loadTrackCmd(track)
@@ -694,6 +703,7 @@ func (m AppModel) playCurrent() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// playNext avanza a la siguiente canción de la lista y la reproduce.
 func (m AppModel) playNext() (tea.Model, tea.Cmd) {
 	if track, ok := m.playlist.Next(); ok {
 		m.cursorIndex = m.playlist.current
@@ -703,6 +713,7 @@ func (m AppModel) playNext() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// playPrevious reinicia la pista si han transcurrido más de 3 segundos, o retrocede a la canción previa.
 func (m AppModel) playPrevious() (tea.Model, tea.Cmd) {
 	if m.elapsed > 3*time.Second {
 		cmd := m.seekTo(0)
@@ -715,6 +726,7 @@ func (m AppModel) playPrevious() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// playSelected reproduce la pista sobre la que está posicionado el cursor.
 func (m AppModel) playSelected() (tea.Model, tea.Cmd) {
 	if m.playlist.JumpTo(m.cursorIndex) {
 		return m.playCurrent()
@@ -722,6 +734,8 @@ func (m AppModel) playSelected() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// removeSelected elimina de la lista la pista bajo el cursor, gestionando la continuidad
+// de la reproducción si correspondía a la canción en curso.
 func (m AppModel) removeSelected() (tea.Model, tea.Cmd) {
 	if !m.playlist.isValidIndex(m.cursorIndex) {
 		return m, nil
@@ -742,21 +756,20 @@ func (m AppModel) removeSelected() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// moveCursor desplaza el cursor de navegación vertical dentro de los límites válidos de la lista.
 func (m *AppModel) moveCursor(delta int) {
 	m.cursorIndex = max(0, min(m.cursorIndex+delta, m.playlist.Length()-1))
 }
 
+// adjustVolume modifica la ganancia de salida en pasos de decibelios respetando los topes configurados.
 func (m *AppModel) adjustVolume(delta float64) {
 	m.volumeLevel = max(minVolume, min(maxVolume, m.volumeLevel+delta))
 	m.Audio.SetVolume(m.volumeLevel)
 }
 
+// seekTo desplaza la reproducción a un punto temporal concreto, limitándolo entre 0 y la duración total
+// para evitar errores críticos de decodificación al rebasar los extremos del archivo.
 func (m *AppModel) seekTo(position time.Duration) tea.Cmd {
-	// Limitar la posición antes de solicitarla al motor de audio: los
-	// decodificadores subyacentes devuelven un error si se les pide una
-	// posición negativa o posterior al final de la pista, lo que antes
-	// disparaba una pantalla de "CRITICAL ERROR" al rebobinar cerca del
-	// inicio o avanzar cerca del final de una canción.
 	position = clampDuration(position, 0, m.totalTime)
 	if err := m.Audio.Seek(position); err != nil {
 		return func() tea.Msg { return errorMsg{err} }
@@ -765,19 +778,24 @@ func (m *AppModel) seekTo(position time.Duration) tea.Cmd {
 	return nil
 }
 
+// seekForward adelanta la reproducción en el número de segundos especificado.
 func (m *AppModel) seekForward(seconds int) tea.Cmd {
 	return m.seekTo(m.elapsed + time.Duration(seconds)*time.Second)
 }
 
+// seekBackward retrocede la reproducción en el número de segundos especificado.
 func (m *AppModel) seekBackward(seconds int) tea.Cmd {
 	return m.seekTo(m.elapsed - time.Duration(seconds)*time.Second)
 }
 
+// resetPlayback detiene la salida de audio y restablece a cero los tiempos y estados de reproducción.
 func (m *AppModel) resetPlayback() {
 	m.Audio.Stop()
 	m.state, m.elapsed, m.totalTime = StateStopped, 0, 0
 }
 
+// View compone y renderiza la interfaz visual completa de la pantalla del reproductor
+// reuniendo el encabezado, tarjeta de estado, explorador o cola de canciones y el panel de ayuda.
 func (m AppModel) View() string {
 	if m.lastError != nil {
 		return m.renderErrorScreen()
@@ -803,20 +821,23 @@ func (m AppModel) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
+// renderHeader construye el título de la aplicación y su subtítulo con estilos de Lipgloss.
 func (m AppModel) renderHeader() string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(pink).MarginLeft(2).MarginTop(1).Render(appName)
 	return title + "  " + lipgloss.NewStyle().Foreground(comment).Render(appSubtitle)
 }
 
+// renderNowPlayingPanel construye la tarjeta central que muestra la pista activa,
+// la barra de progreso, los metadatos de audio y la ruta del directorio actual.
 func (m AppModel) renderNowPlayingPanel() string {
 	track, hasTrack := m.playlist.Current()
 	var content strings.Builder
 
 	if hasTrack {
 		content.WriteString(m.renderStatusLine(track))
-		content.WriteString("\n\n") // Added extra spacing
+		content.WriteString("\n\n")
 		content.WriteString(m.renderProgressBar())
-		content.WriteString("\n\n") // Added extra spacing
+		content.WriteString("\n\n")
 		content.WriteString(m.renderMetadataLine())
 	} else {
 		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(red).Render(iconStop + " Sin canciones\n"))
@@ -828,6 +849,8 @@ func (m AppModel) renderNowPlayingPanel() string {
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(purple).Padding(1, 2).Margin(0, 2).Render(content.String()) + "\n" + dirDisplay
 }
 
+// renderStatusLine devuelve la línea con el icono de estado coloreado (reproduciendo, pausado, detenido)
+// y el nombre de la pista activa formateado.
 func (m AppModel) renderStatusLine(track Track) string {
 	var icon string
 	var style lipgloss.Style
@@ -843,13 +866,15 @@ func (m AppModel) renderStatusLine(track Track) string {
 	return lipgloss.NewStyle().MarginLeft(2).Render(style.Render(icon) + " " + style.Render(m.state.Label()) + "  " + track.DisplayName())
 }
 
+// renderProgressBar dibuja la barra de progreso proporcional al tiempo transcurrido
+// junto a los indicadores numéricos de tiempo ("MM:SS / MM:SS").
 func (m AppModel) renderProgressBar() string {
 	percent := 0.0
 	if m.totalTime > 0 {
 		percent = float64(m.elapsed) / float64(m.totalTime)
 	}
 
-	// Apply theme colors to progress bar dynamically
+	// Asignar colores de tema a la barra de progreso
 	m.progressBar.FullColor = string(pink)
 	m.progressBar.EmptyColor = string(selection)
 
@@ -858,6 +883,8 @@ func (m AppModel) renderProgressBar() string {
 	return lipgloss.NewStyle().MarginLeft(2).Render(bar) + lipgloss.NewStyle().Foreground(cyan).Render(timeInfo)
 }
 
+// renderMetadataLine genera la fila de información técnica: barra de volumen,
+// número de pista en la cola, indicador de orden aleatorio e icono de repetición.
 func (m AppModel) renderMetadataLine() string {
 	queueDisplay := "0/0"
 	if m.playlist.Length() > 0 {
@@ -875,10 +902,9 @@ func (m AppModel) renderMetadataLine() string {
 	)
 }
 
-// renderPlaylistPanel returns a textual representation of the upcoming queue.
-// When quick-filter is active it shows a windowed view of the filtered results
-// centered at the current filter cursor. In normal mode it shows a windowed
-// view around the main cursorIndex.
+// renderPlaylistPanel devuelve una representación en lista de la cola de canciones.
+// Si el filtro de búsqueda está activo, muestra una ventana centrada en el cursor de búsqueda;
+// en caso contrario, muestra una ventana alrededor del cursor de la lista de reproducción.
 func (m AppModel) renderPlaylistPanel() string {
 	if m.playlist.IsEmpty() {
 		return ""
@@ -888,10 +914,10 @@ func (m AppModel) renderPlaylistPanel() string {
 	builder.WriteString(lipgloss.NewStyle().Bold(true).Foreground(orange).Render("  " + iconQueue + " Próximamente:"))
 	builder.WriteString("\n")
 
-	// When filtering, render the filteredIndices list around filterCursor
+	// Vista con filtro de búsqueda activo
 	if m.isFiltering {
 		if m.filteredIndices == nil || len(m.filteredIndices) == 0 {
-			builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  (No matches)") + "\n")
+			builder.WriteString(lipgloss.NewStyle().Foreground(comment).Render("  (No hay coincidencias)") + "\n")
 			return builder.String()
 		}
 
@@ -919,7 +945,7 @@ func (m AppModel) renderPlaylistPanel() string {
 		return builder.String()
 	}
 
-	// Default (non-filtering) view: same as before
+	// Vista secuencial estándar de la cola de pistas
 	start := max(0, m.cursorIndex-3)
 	end := min(m.playlist.Length(), start+7)
 
@@ -943,6 +969,8 @@ func (m AppModel) renderPlaylistPanel() string {
 	return builder.String()
 }
 
+// renderBrowserPanel dibuja el panel interactivo del explorador de carpetas,
+// mostrando los archivos de audio y subdirectorios para su selección.
 func (m AppModel) renderBrowserPanel() string {
 	header := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render(iconFolder + " Explorador de Carpetas: " + m.browserPath)
 
@@ -982,6 +1010,8 @@ func (m AppModel) renderBrowserPanel() string {
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cyan).Padding(1, 2).MarginLeft(2).Render(builder.String())
 }
 
+// renderHelpPanel dibuja el catálogo de atajos de teclado agrupados temáticamente
+// (Reproducción, Navegación, Audio y Sistema), adaptando el número de columnas al ancho del terminal.
 func (m AppModel) renderHelpPanel() string {
 	type binding struct{ key, desc string }
 	type category struct {
@@ -1029,6 +1059,7 @@ func (m AppModel) renderHelpPanel() string {
 	return helpContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
 }
 
+// renderErrorScreen construye la vista de alerta crítica con fondo rojo en caso de errores graves.
 func (m AppModel) renderErrorScreen() string {
 	if m.lastError == nil {
 		return ""
