@@ -1,3 +1,5 @@
+// Package player proporciona la abstracción y control del motor de audio de bajo nivel
+// sobre la biblioteca beep y el backend de sonido del sistema operativo.
 package player
 
 import (
@@ -17,16 +19,19 @@ import (
 	"github.com/faiface/beep/wav"
 )
 
-// Limiter limita los niveles de audio para prevenir saturación (clipping).
+// Limiter es un streamer envoltorio que acota las muestras de audio en el rango [-1.0, 1.0].
+// Su propósito es prevenir la saturación acústica y distorsión por recorte (clipping)
+// cuando se aplican ganancias altas de volumen.
 type Limiter struct {
 	Streamer beep.Streamer
 }
 
-// Stream implementa la interfaz beep.Streamer aplicando un limitador a los samples.
+// Stream procesa las muestras del streamer subyacente y restringe la amplitud de cada canal
+// (estéreo: canal 0 izquierdo, canal 1 derecho) al intervalo [-1.0, 1.0].
 func (l *Limiter) Stream(samples [][2]float64) (n int, ok bool) {
 	n, ok = l.Streamer.Stream(samples)
 	for i := range samples[:n] {
-		for ch := 0; ch < 2; ch++ { // Canales Izquierdo y Derecho
+		for ch := 0; ch < 2; ch++ { // Canales Izquierdo (0) y Derecho (1)
 			if samples[i][ch] > 1.0 {
 				samples[i][ch] = 1.0
 			} else if samples[i][ch] < -1.0 {
@@ -37,7 +42,8 @@ func (l *Limiter) Stream(samples [][2]float64) (n int, ok bool) {
 	return n, ok
 }
 
-// Err devuelve el error de la interfaz Streamer subyacente.
+// Err propaga cualquier error generado por el Streamer subyacente si este implementa
+// la interfaz de comprobación de errores.
 func (l *Limiter) Err() error {
 	if se, ok := l.Streamer.(interface{ Err() error }); ok {
 		return se.Err()
@@ -45,23 +51,27 @@ func (l *Limiter) Err() error {
 	return nil
 }
 
-// AudioEngine gestiona la reproducción de archivos de audio.
+// AudioEngine centraliza la carga, decodificación, efectos y reproducción de archivos de audio.
+// Controla el ciclo de vida del altavoz (speaker) y la sincronización segura frente a accesos concurrentes.
 type AudioEngine struct {
-	streamer   beep.StreamSeekCloser
-	ctrl       *beep.Ctrl
-	volume     *effects.Volume
-	format     beep.Format
-	isInit     bool
-	sessionID  int
-	cancelChan chan struct{}
+	streamer   beep.StreamSeekCloser // Decodificador activo del archivo de audio con capacidad de seek y cierre
+	ctrl       *beep.Ctrl            // Controlador para pausar y reanudar el flujo de datos
+	volume     *effects.Volume       // Efecto de ganancia para control de volumen logarítmico
+	format     beep.Format           // Formato original del archivo (frecuencia de muestreo y precisión)
+	isInit     bool                  // Bandera para asegurar inicialización única del altavoz
+	sessionID  int                   // Identificador de la sesión de reproducción actual (invalida eventos de pistas pasadas)
+	cancelChan chan struct{}         // Canal para abortar de forma limpia la espera de término si se salta de pista
 }
 
-// NewAudioEngine crea una nueva instancia del motor de audio.
+// NewAudioEngine inicializa y devuelve una nueva instancia del motor de audio.
 func NewAudioEngine() *AudioEngine {
 	return &AudioEngine{}
 }
 
-// Load carga un archivo de audio para su reproducción.
+// Load detiene cualquier reproducción en curso, abre el archivo en disco, detecta su formato
+// por extensión (.mp3, .wav, .flac, .ogg), decodifica el stream, lo remuestrea a la frecuencia
+// estándar de 44.1 kHz y configura la cadena de efectos (control de pausa y volumen).
+// Devuelve la duración real del archivo o un error en caso de fallo.
 func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	ae.Stop()
 
@@ -95,6 +105,7 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 
 	realDuration := format.SampleRate.D(streamer.Len())
 
+	// Inicializar el subsistema del speaker una sola vez con la frecuencia estándar y un buffer de 100ms
 	if !ae.isInit {
 		if err := speaker.Init(standardSampleRate, standardSampleRate.N(time.Second/10)); err != nil {
 			_ = streamer.Close()
@@ -107,12 +118,13 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	ae.streamer = streamer
 	ae.format = format
 
+	// Remuestreo de alta calidad a 44100 Hz para evitar desajustes de velocidad en archivos con diferente frecuencia
 	resampled := beep.Resample(4, format.SampleRate, standardSampleRate, streamer)
 
 	ae.ctrl = &beep.Ctrl{Streamer: resampled}
 	ae.volume = &effects.Volume{
 		Streamer: ae.ctrl,
-		Base:     math.Pow(10, 1.0/20.0), // Control de volumen logarítmico
+		Base:     math.Pow(10, 1.0/20.0), // Base para atenuación/ganancia logarítmica en decibelios (dB)
 		Volume:   0,
 		Silent:   false,
 	}
@@ -120,7 +132,8 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	return realDuration, nil
 }
 
-// Play inicia la reproducción del stream actual y devuelve un canal que se cierra al finalizar.
+// Play envía la cadena de audio (Limiter -> Volume -> Ctrl -> Streamer) al subsistema de altavoces
+// y devuelve un canal que se cierra automáticamente cuando la reproducción concluye con éxito.
 func (ae *AudioEngine) Play() chan struct{} {
 	done := make(chan struct{})
 	limiter := &Limiter{Streamer: ae.volume}
@@ -131,7 +144,8 @@ func (ae *AudioEngine) Play() chan struct{} {
 	return done
 }
 
-// Stop detiene la reproducción actual y limpia los recursos del motor de audio.
+// Stop cancela inmediatamente la reproducción activa, limpia la cola de muestras del altavoz
+// y cierra el archivo de audio liberando los descriptores de archivo asociados.
 func (ae *AudioEngine) Stop() {
 	speaker.Clear()
 
@@ -149,7 +163,7 @@ func (ae *AudioEngine) Stop() {
 	speaker.Unlock()
 }
 
-// Pause pausa la reproducción actual de forma segura.
+// Pause pausa la reproducción actual de manera segura evitando condiciones de carrera con el hilo de audio.
 func (ae *AudioEngine) Pause() {
 	speaker.Lock()
 	defer speaker.Unlock()
@@ -159,7 +173,7 @@ func (ae *AudioEngine) Pause() {
 	ae.ctrl.Paused = true
 }
 
-// Resume reanuda la reproducción previamente pausada de forma segura.
+// Resume reanuda la reproducción previamente pausada de manera segura.
 func (ae *AudioEngine) Resume() {
 	speaker.Lock()
 	defer speaker.Unlock()
@@ -169,7 +183,7 @@ func (ae *AudioEngine) Resume() {
 	ae.ctrl.Paused = false
 }
 
-// SetVolume ajusta el volumen del motor de audio de forma segura.
+// SetVolume ajusta la ganancia en decibelios (dB) dentro del efecto de volumen de forma segura.
 func (ae *AudioEngine) SetVolume(level float64) {
 	speaker.Lock()
 	defer speaker.Unlock()
@@ -179,7 +193,7 @@ func (ae *AudioEngine) SetVolume(level float64) {
 	ae.volume.Volume = level
 }
 
-// ToggleMute alterna el estado de silencio de forma segura.
+// ToggleMute conmuta el estado de silencio (mute) sin perder el nivel de volumen configurado.
 func (ae *AudioEngine) ToggleMute() {
 	speaker.Lock()
 	defer speaker.Unlock()
@@ -189,14 +203,14 @@ func (ae *AudioEngine) ToggleMute() {
 	ae.volume.Silent = !ae.volume.Silent
 }
 
-// IsMuted devuelve verdadero si el audio está silenciado de forma segura.
+// IsMuted indica si el audio está actualmente silenciado de forma segura.
 func (ae *AudioEngine) IsMuted() bool {
 	speaker.Lock()
 	defer speaker.Unlock()
 	return ae.volume != nil && ae.volume.Silent
 }
 
-// Position devuelve la posición actual de reproducción de forma segura.
+// Position calcula y devuelve el tiempo transcurrido de reproducción de la pista actual en formato time.Duration.
 func (ae *AudioEngine) Position() time.Duration {
 	speaker.Lock()
 	defer speaker.Unlock()
@@ -206,7 +220,8 @@ func (ae *AudioEngine) Position() time.Duration {
 	return 0
 }
 
-// Seek mueve la posición de reproducción a una duración específica de forma segura.
+// Seek desplaza la posición de lectura del stream a la duración solicitada de forma segura.
+// Retorna un error si el formato del archivo no admite posicionamiento arbitrario.
 func (ae *AudioEngine) Seek(position time.Duration) error {
 	speaker.Lock()
 	defer speaker.Unlock()
@@ -226,7 +241,7 @@ func (ae *AudioEngine) Seek(position time.Duration) error {
 	return nil
 }
 
-// Close cierra el motor de audio liberando todos los recursos.
+// Close detiene la reproducción y libera de manera definitiva los recursos del subsistema de audio.
 func (ae *AudioEngine) Close() {
 	ae.Stop()
 	if ae.isInit {
