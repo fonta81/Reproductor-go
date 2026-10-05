@@ -254,6 +254,8 @@ func (m *AppModel) openBrowser(dir string) tea.Cmd {
 	return m.loadBrowserDir(dir)
 }
 
+// Update procesa los eventos y mensajes del bucle de Bubble Tea (redimensionamiento, escaneos de biblioteca,
+// carga de pistas, temporizadores de refresco, fin de reproducción y entrada de teclado en diferentes modos).
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -333,6 +335,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// handleBrowserInput procesa las pulsaciones de teclado cuando el explorador de carpetas está en primer plano,
+// permitiendo navegar directorios, subir de nivel respetando el home del usuario y confirmar la selección.
 func (m AppModel) handleBrowserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
@@ -599,6 +603,8 @@ func (m AppModel) renderSuggestions() string {
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(selection).Padding(0, 1).MarginLeft(2).Render(b.String())
 }
 
+// handleKeyInput procesa los atajos de teclado estándar en la vista principal del reproductor
+// para controlar la reproducción, volumen, modos (shuffle/repeat), búsqueda y navegación por la cola.
 func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":

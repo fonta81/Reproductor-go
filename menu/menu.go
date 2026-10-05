@@ -1,3 +1,5 @@
+// Package menu proporciona la interfaz interactiva, componentes visuales y máquina de estados
+// del menú principal de GoPlayer construidos sobre Bubble Tea y Lipgloss.
 package menu
 
 import (
@@ -8,69 +10,76 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Action representa la acción solicitada por el usuario en el menú.
+// Action define los identificadores numéricos de las acciones que el usuario puede desencadenar desde el menú.
 type Action int
 
+// Enumeración de las acciones admitidas por el menú principal.
 const (
-	ActionTogglePlay Action = iota
-	ActionViewPlayer
-	ActionNextTrack
-	ActionPrevTrack
-	ActionLibrary
-	ActionSettings
-	ActionQuit
+	ActionTogglePlay Action = iota // Conmuta entre reproducción y pausa de la pista activa.
+	ActionViewPlayer               // Cambia la vista activa hacia el reproductor completo.
+	ActionNextTrack                // Salta a la siguiente canción en la lista de reproducción.
+	ActionPrevTrack                // Retrocede a la canción previa en la lista de reproducción.
+	ActionLibrary                  // Accede a la vista de la biblioteca y cola musical.
+	ActionSettings                 // Despliega el explorador de carpetas para seleccionar el directorio de música.
+	ActionQuit                     // Finaliza la ejecución de la aplicación liberando recursos.
 )
 
-// PlayerState contiene la información del reproductor necesaria para el menú.
+// PlayerState encapsula la telemetría y el estado operativo del motor de audio necesarios
+// para renderizar el widget informativo ("Now Playing") dentro del menú principal.
 type PlayerState struct {
-	State                string // "Reproduciendo", "Pausado", "Detenido"
-	IsPlaying            bool
-	IsPaused             bool
-	CurrentTrackTitle    string
-	CurrentTrackArtist   string
-	CurrentTrackDuration string
-	TrackCount           int
-	Volume               int // 0 - 100%
-	IsMuted              bool
-	HasTrack             bool
+	State                string // Descripción textual del estado ("Reproduciendo", "Pausado", "Detenido")
+	IsPlaying            bool   // Indica si el motor de audio está reproduciendo activamente
+	IsPaused             bool   // Indica si la reproducción se encuentra en pausa
+	CurrentTrackTitle    string // Título de la pista en reproducción
+	CurrentTrackArtist   string // Artista o intérprete de la pista en reproducción
+	CurrentTrackDuration string // Duración formateada ("MM:SS") de la pista activa
+	TrackCount           int    // Cantidad total de pistas disponibles en la biblioteca
+	Volume               int    // Nivel de volumen normalizado en escala porcentual (0 - 100%)
+	IsMuted              bool   // Indica si el audio se encuentra actualmente silenciado
+	HasTrack             bool   // Indica si existe una pista seleccionada en el reproductor
 }
 
-// SelectMsg se emite cuando el usuario selecciona una opción del menú.
+// SelectMsg es el mensaje emitido por el modelo de menú cuando el usuario confirma una selección,
+// transportando la acción asociada y la etiqueta legible de la opción elegida.
 type SelectMsg struct {
-	Action Action
-	Choice string
+	Action Action // Acción asociada al elemento seleccionado
+	Choice string // Etiqueta descriptiva del elemento seleccionado
 }
 
-// UpdateStateMsg permite actualizar el estado del menú mediante Bubble Tea.
+// UpdateStateMsg es un mensaje de Bubble Tea utilizado para inyectar una actualización
+// de estado del reproductor de audio dentro del ciclo de actualización del menú.
 type UpdateStateMsg struct {
-	State PlayerState
+	State PlayerState // Nueva instantánea del estado del reproductor
 }
 
+// menuItem modela un ítem individual en la lista navegable de opciones del menú principal.
 type menuItem struct {
-	action Action
-	label  string
-	icon   string
-	badge  string
+	action Action // Acción que se ejecutará al seleccionar esta opción
+	label  string // Texto descriptivo visible para el usuario
+	icon   string // Icono o emoji representativo de la opción
+	badge  string // Dígito o tecla de acceso rápido asociada a la opción
 }
 
-// Estilos de lipgloss para Catppuccin Mocha / UI moderna
+// Paleta de colores para los elementos del menú inspirada en el tema Catppuccin Mocha.
 var (
-	colorAccent    = lipgloss.Color("#CBA6F7") // Lavanda
-	colorSecondary = lipgloss.Color("#94E2D5") // Cyan / Teal
-	colorGreen     = lipgloss.Color("#A6E3A1") // Verde
-	colorYellow    = lipgloss.Color("#F9E2AF") // Amarillo
-	colorOrange    = lipgloss.Color("#FAB387") // Naranja
-	colorRed       = lipgloss.Color("#F38BA8") // Rojo
-	colorText      = lipgloss.Color("#CDD6F4") // Texto principal
-	colorSubtext   = lipgloss.Color("#A6ADC8") // Texto secundario
-	colorMuted     = lipgloss.Color("#6C7086") // Texto atenuado / bordes tenues
-	colorSurface   = lipgloss.Color("#313244") // Superficie de selección
-	colorDarkBg    = lipgloss.Color("#181825") // Fondo oscuro
+	colorAccent    = lipgloss.Color("#CBA6F7") // Lavanda / Acento principal para bordes y títulos destacados
+	colorSecondary = lipgloss.Color("#94E2D5") // Cyan / Teal para texto secundario e insignias numéricas
+	colorGreen     = lipgloss.Color("#A6E3A1") // Verde para indicar estado de reproducción activa
+	colorYellow    = lipgloss.Color("#F9E2AF") // Amarillo para indicar estado de reproducción en pausa
+	colorOrange    = lipgloss.Color("#FAB387") // Naranja para advertencias o niveles de aviso
+	colorRed       = lipgloss.Color("#F38BA8") // Rojo para indicar silenciamiento (Mute) y errores
+	colorText      = lipgloss.Color("#CDD6F4") // Color de texto principal de alto contraste
+	colorSubtext   = lipgloss.Color("#A6ADC8") // Color de texto secundario para subtítulos y artistas
+	colorMuted     = lipgloss.Color("#6C7086") // Color atenuado para metadatos complementarios y atajos
+	colorSurface   = lipgloss.Color("#313244") // Fondo para resaltar la opción actualmente seleccionada
+	colorDarkBg    = lipgloss.Color("#181825") // Tono de fondo oscuro base
 
+	// menuBoxStyle define el contenedor exterior que engloba todo el contenido del menú.
 	menuBoxStyle = lipgloss.NewStyle().
 			Width(58).
 			Padding(0, 1)
 
+	// headerBoxStyle define el contenedor con borde redondeado para el encabezado del menú.
 	headerBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colorAccent).
@@ -79,42 +88,52 @@ var (
 			Padding(0, 1).
 			MarginBottom(1)
 
+	// headerTitleStyle define la tipografía en negrita y color lavanda para el título principal.
 	headerTitleStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(colorAccent)
 
+	// headerSubStyle define el estilo en cursiva y color atenuado para el subtítulo del menú.
 	headerSubStyle = lipgloss.NewStyle().
 			Foreground(colorSubtext).
 			Italic(true)
 
+	// cardStyle define el marco de la tarjeta informativa "Now Playing" con bordes redondeados.
 	cardStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			Width(56).
 			Padding(0, 1).
 			MarginBottom(1)
 
+	// cardHeaderStyle define la apariencia del indicador de estado en la cabecera de la tarjeta.
 	cardHeaderStyle = lipgloss.NewStyle().
 			Bold(true).
 			MarginBottom(0)
 
+	// trackTitleStyle define el estilo en negrita y alto contraste para el título de la canción activa.
 	trackTitleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorText)
 
+	// trackArtistStyle define el color secundario para el artista o intérprete de la pista activa.
 	trackArtistStyle = lipgloss.NewStyle().
 				Foreground(colorSecondary)
 
+	// metaInfoStyle define el estilo para la información complementaria (volumen, total de pistas).
 	metaInfoStyle = lipgloss.NewStyle().
 			Foreground(colorMuted)
 
+	// itemBadgeNormal define el formato visual de los atajos numéricos [1]-[7] para opciones no seleccionadas.
 	itemBadgeNormal = lipgloss.NewStyle().
 			Foreground(colorSecondary).
 			Bold(true)
 
+	// itemBadgeSelected define el formato visual de los atajos numéricos [1]-[7] para la opción bajo el cursor.
 	itemBadgeSelected = lipgloss.NewStyle().
 				Foreground(colorAccent).
 				Bold(true)
 
+	// selectedItemStyle define el fondo y resaltado visual para la opción actualmente destacada por el cursor.
 	selectedItemStyle = lipgloss.NewStyle().
 				Background(colorSurface).
 				Foreground(colorAccent).
@@ -122,11 +141,13 @@ var (
 				Padding(0, 1).
 				Width(56)
 
+	// unselectedItemStyle define la apariencia estándar para las opciones no seleccionadas del menú.
 	unselectedItemStyle = lipgloss.NewStyle().
 				Foreground(colorText).
 				Padding(0, 1).
 				Width(56)
 
+	// footerStyle define la presentación del pie de página con los atajos de teclado y ayuda rápida.
 	footerStyle = lipgloss.NewStyle().
 			Foreground(colorMuted).
 			Align(lipgloss.Center).
@@ -134,31 +155,35 @@ var (
 			MarginTop(1)
 )
 
-// Model representa el estado del componente de menú.
+// Model gestiona el estado interno del componente de menú interactivo,
+// incluyendo el cursor de navegación, las dimensiones del terminal y los datos del reproductor.
 type Model struct {
-	cursor   int
-	selected string
-	state    PlayerState
-	width    int
-	height   int
+	cursor   int         // Posición del cursor en la lista de opciones (0-indexada)
+	selected string      // Etiqueta de la última opción seleccionada por el usuario
+	state    PlayerState // Estado sincronizado del reproductor de audio
+	width    int         // Ancho del terminal en columnas
+	height   int         // Alto del terminal en filas
 }
 
-// New inicializa una nueva instancia del modelo de menú.
+// New inicializa y devuelve una nueva instancia del modelo de menú con el cursor en la primera posición.
 func New() Model {
 	return Model{
 		cursor: 0,
 	}
 }
 
-// SetState actualiza directamente el estado del reproductor reflejado en el menú.
+// SetState actualiza directamente la información del reproductor de audio reflejada en la tarjeta del menú.
 func (m *Model) SetState(s PlayerState) {
 	m.state = s
 }
 
+// Init inicializa el componente de menú conforme a la especificación de Bubble Tea.
 func (m Model) Init() tea.Cmd {
 	return nil
 }
 
+// getMenuItems construye la lista de elementos del menú adaptando dinámicamente
+// la etiqueta y el icono de reproducción según el estado actual del reproductor (reproducir, pausar o reanudar).
 func (m Model) getMenuItems() []menuItem {
 	var playLabel, playIcon string
 	if m.state.IsPlaying {
@@ -183,14 +208,18 @@ func (m Model) getMenuItems() []menuItem {
 	}
 }
 
+// Update procesa los eventos y mensajes del ciclo de vida de Bubble Tea, incluyendo
+// redimensionamientos del terminal, actualización de telemetría y navegación mediante teclado.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		// Actualizar dimensiones para centrado y cálculo de layout
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
 
 	case UpdateStateMsg:
+		// Inyectar nueva instantánea de telemetría del reproductor
 		m.state = msg.State
 		return m, nil
 
@@ -199,9 +228,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "ctrl+c", "q":
+			// Salida directa de la aplicación
 			return m, tea.Quit
 
 		case "p", "esc":
+			// Atajo directo para navegar a la vista completa del reproductor
 			return m, func() tea.Msg {
 				return SelectMsg{
 					Action: ActionViewPlayer,
@@ -210,6 +241,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "up", "k":
+			// Navegación vertical ascendente con rotación cíclica
 			if m.cursor > 0 {
 				m.cursor--
 			} else {
@@ -217,6 +249,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "down", "j":
+			// Navegación vertical descendente con rotación cíclica
 			if m.cursor < len(items)-1 {
 				m.cursor++
 			} else {
@@ -224,6 +257,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "1", "2", "3", "4", "5", "6", "7":
+			// Selección directa inmediata mediante tecla numérica rápida
 			idx := int(msg.Runes[0] - '1')
 			if idx >= 0 && idx < len(items) {
 				m.cursor = idx
@@ -231,6 +265,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "enter", " ":
+			// Confirmación de la opción actualmente destacada por el cursor
 			if m.cursor >= 0 && m.cursor < len(items) {
 				return m.handleSelection(items[m.cursor])
 			}
@@ -239,7 +274,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleSelection centraliza la lógica de despacho al seleccionar un ítem del menú.
+// handleSelection centraliza la lógica de ejecución al confirmar una opción del menú,
+// emitiendo el comando de finalización en caso de salida o despachando el mensaje SelectMsg correspondiente.
 func (m Model) handleSelection(item menuItem) (tea.Model, tea.Cmd) {
 	m.selected = item.label
 	if item.action == ActionQuit {
@@ -253,10 +289,13 @@ func (m Model) handleSelection(item menuItem) (tea.Model, tea.Cmd) {
 	}
 }
 
+// renderNowPlayingCard genera la tarjeta visual "Now Playing" con información sobre el estado
+// de la reproducción, la pista activa, el volumen actual y el total de canciones cargadas en la biblioteca.
 func (m Model) renderNowPlayingCard() string {
 	var borderColor lipgloss.Color
 	var statusBadge string
 
+	// Definir color de borde e insignia según el estado del motor de sonido
 	if m.state.IsPlaying {
 		borderColor = colorGreen
 		statusBadge = lipgloss.NewStyle().Foreground(colorGreen).Bold(true).Render("▶ REPRODUCIENDO")
@@ -268,6 +307,7 @@ func (m Model) renderNowPlayingCard() string {
 		statusBadge = lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("⏹ DETENIDO")
 	}
 
+	// Renderizado del indicador de volumen y silencio
 	var volText string
 	if m.state.IsMuted {
 		volText = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Render("󰖁 MUTE")
@@ -288,6 +328,7 @@ func (m Model) renderNowPlayingCard() string {
 	var b strings.Builder
 	b.WriteString(cardHeaderStyle.Render(statusBadge) + "\n")
 
+	// Renderizado de metadatos de la pista en reproducción
 	if m.state.HasTrack && m.state.CurrentTrackTitle != "" {
 		b.WriteString(trackTitleStyle.Render("🎵 "+truncateText(m.state.CurrentTrackTitle, 45)) + "\n")
 
@@ -309,8 +350,8 @@ func (m Model) renderNowPlayingCard() string {
 	return cardStyle.Copy().BorderForeground(borderColor).Render(b.String())
 }
 
-// truncateText recorta una cadena a maxLen runas, añadiendo "..." si es necesario.
-// Opera sobre runas para evitar cortes en medio de caracteres multibyte.
+// truncateText acota una cadena de texto a un número máximo de runas agregando puntos suspensivos ("...")
+// si se sobrepasa dicho límite, preservando caracteres multibyte y evitando desbordamientos visuales.
 func truncateText(str string, maxLen int) string {
 	runes := []rune(str)
 	if len(runes) > maxLen {
@@ -319,10 +360,13 @@ func truncateText(str string, maxLen int) string {
 	return str
 }
 
+// View renderiza la interfaz visual completa del menú, reuniendo el encabezado,
+// la tarjeta informativa de reproducción, las opciones seleccionables y los atajos de teclado,
+// aplicando centrado geométrico si se conocen las dimensiones del terminal.
 func (m Model) View() string {
 	var b strings.Builder
 
-	// 1. Header con título estilizado
+	// 1. Encabezado principal estilizado
 	headerContent := fmt.Sprintf("%s\n%s",
 		headerTitleStyle.Render("🎵  G O P L A Y E R  •  M E N Ú"),
 		headerSubStyle.Render("Reproductor de Audio TUI"),
@@ -330,11 +374,11 @@ func (m Model) View() string {
 	b.WriteString(headerBoxStyle.Render(headerContent))
 	b.WriteString("\n")
 
-	// 2. Mini-Widget "Now Playing"
+	// 2. Tarjeta widget "Now Playing" con telemetría en tiempo real
 	b.WriteString(m.renderNowPlayingCard())
 	b.WriteString("\n")
 
-	// 3. Opciones del Menú
+	// 3. Renderizado de las opciones de menú interactivas
 	items := m.getMenuItems()
 	for i, item := range items {
 		if m.cursor == i {
@@ -355,13 +399,13 @@ func (m Model) View() string {
 		b.WriteString("\n")
 	}
 
-	// 4. Footer con atajos de ayuda
+	// 4. Pie de página informativo con atajos rápidos de ayuda
 	helpText := "1-7: selección • ↑/↓: navegar • enter: elegir\nesc/p: reproductor • q: salir"
 	b.WriteString(footerStyle.Render(helpText))
 
 	content := menuBoxStyle.Render(b.String())
 
-	// Centrado adaptable si se conocen las dimensiones de la terminal
+	// Centrado adaptable en el terminal según ancho y alto disponibles
 	if m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 	}

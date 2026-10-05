@@ -1,3 +1,6 @@
+// Package player define las estructuras de datos y modelos de estado del reproductor de audio,
+// incluyendo estados de reproducción, modos de repetición, metadatos de pistas y la gestión
+// algorítmica de la lista de reproducción con soporte para orden secuencial y aleatorio.
 package player
 
 import (
@@ -6,16 +9,17 @@ import (
 	"time"
 )
 
-// PlaybackState define los estados posibles de la reproducción.
+// PlaybackState define los estados posibles en el ciclo de vida de la reproducción de audio.
 type PlaybackState int
 
+// Enumeración de los estados de reproducción admitidos.
 const (
-	StateStopped PlaybackState = iota
-	StatePlaying
-	StatePaused
+	StateStopped PlaybackState = iota // Reproducción totalmente detenida; no hay flujo de audio activo.
+	StatePlaying                      // Flujo de audio activo enviando muestras al altavoz.
+	StatePaused                       // Reproducción suspendida temporalmente preservando la posición actual.
 )
 
-// Icon devuelve el icono correspondiente al estado de reproducción actual.
+// Icon devuelve el glifo visual (Nerd Font / Unicode) representativo del estado de reproducción actual.
 func (s PlaybackState) Icon() string {
 	switch s {
 	case StatePlaying:
@@ -27,7 +31,7 @@ func (s PlaybackState) Icon() string {
 	}
 }
 
-// Label devuelve la etiqueta legible para el usuario del estado de reproducción actual.
+// Label devuelve la descripción textual legible para el usuario en la interfaz según el estado de reproducción activo.
 func (s PlaybackState) Label() string {
 	switch s {
 	case StatePlaying:
@@ -39,16 +43,17 @@ func (s PlaybackState) Label() string {
 	}
 }
 
-// RepeatMode define los modos de repetición de la lista de reproducción.
+// RepeatMode define las políticas de repetición configurables para el recorrido de la lista de reproducción.
 type RepeatMode int
 
+// Modos de repetición soportados por la lista de reproducción.
 const (
-	RepeatOff RepeatMode = iota
-	RepeatOne
-	RepeatAll
+	RepeatOff RepeatMode = iota // Sin repetición; la reproducción se detiene al alcanzar el final de la lista.
+	RepeatOne                   // Repetición continua de la pista actualmente seleccionada en bucle infinito.
+	RepeatAll                   // Repetición cíclica de la lista completa al concluir la última pista.
 )
 
-// Icon devuelve el icono correspondiente al modo de repetición seleccionado.
+// Icon devuelve el glifo visual correspondiente al modo de repetición configurado.
 func (r RepeatMode) Icon() string {
 	switch r {
 	case RepeatOne:
@@ -60,17 +65,18 @@ func (r RepeatMode) Icon() string {
 	}
 }
 
-// Track representa una pista de audio con sus metadatos.
+// Track encapsula los metadatos y la ubicación física en el sistema de archivos de una pista de audio.
 type Track struct {
-	ID       string
-	Title    string
-	Artist   string
-	Album    string
-	Duration time.Duration
-	Path     string // Ruta absoluta o relativa al archivo de audio físico
+	ID       string        // Identificador único asignado a la pista dentro de la biblioteca musical
+	Title    string        // Título de la pista extraído de las etiquetas ID3/Vorbis o del nombre de archivo
+	Artist   string        // Nombre del artista o grupo musical intérprete
+	Album    string        // Nombre del álbum discográfico al que pertenece la pista
+	Duration time.Duration // Duración total del audio decodificado o estimada desde metadatos
+	Path     string        // Ruta absoluta o relativa al archivo físico en el almacenamiento
 }
 
-// DisplayName devuelve una cadena formateada con el artista y título de la pista.
+// DisplayName devuelve una cadena formateada que combina el artista y el título ("Artista — Título").
+// Si el artista no está presente en los metadatos, devuelve exclusivamente el título de la canción.
 func (t Track) DisplayName() string {
 	if t.Artist == "" {
 		return t.Title
@@ -78,7 +84,8 @@ func (t Track) DisplayName() string {
 	return fmt.Sprintf("%s — %s", t.Artist, t.Title)
 }
 
-// FormattedDuration devuelve la duración de la pista como una cadena de tiempo legible.
+// FormattedDuration devuelve la duración de la pista como una cadena legible en formato "MM:SS".
+// Si la duración no está disponible o es menor o igual a cero, retorna el marcador "?:??".
 func (t Track) FormattedDuration() string {
 	if t.Duration <= 0 {
 		return "?:??"
@@ -86,18 +93,20 @@ func (t Track) FormattedDuration() string {
 	return formatDuration(t.Duration)
 }
 
-// Playlist gestiona la lista de pistas, el orden y los modos de reproducción.
+// Playlist gestiona la colección de pistas en memoria, controlando el índice actual
+// y aplicando algoritmos para la navegación lineal y aleatoria (shuffle), asegurando
+// una transición ordenada y coherente entre canciones.
 type Playlist struct {
-	tracks          []Track
-	current         int
-	shuffle         bool
-	repeat          RepeatMode
-	shuffleOrder    []int
-	shuffleIdx      int
-	shuffleStartIdx int
+	tracks          []Track    // Colección ordenada de pistas que integran la lista de reproducción
+	current         int        // Índice de la pista activa en el arreglo tracks (-1 si la lista está vacía)
+	shuffle         bool       // Indica si el modo aleatorio está activo
+	repeat          RepeatMode // Modo de repetición configurado (Off, One, All)
+	shuffleOrder    []int      // Permutación pseudoaleatoria de índices generada por el algoritmo Fisher-Yates
+	shuffleIdx      int        // Posición actual del cursor dentro de la secuencia permutada shuffleOrder
+	shuffleStartIdx int        // Índice de inicio de la permutación aleatoria para detectar ciclos completos
 }
 
-// NewPlaylist inicializa una nueva lista de reproducción vacía.
+// NewPlaylist inicializa y devuelve una lista de reproducción vacía con el cursor inactivo (-1).
 func NewPlaylist() *Playlist {
 	return &Playlist{
 		tracks:  make([]Track, 0),
@@ -105,7 +114,9 @@ func NewPlaylist() *Playlist {
 	}
 }
 
-// Add añade una pista a la lista de reproducción.
+// Add incorpora una nueva pista al final de la lista de reproducción.
+// Si la lista estaba vacía, inicializa el cursor en la primera posición.
+// Si el modo aleatorio se encuentra habilitado, regenera la secuencia permutada.
 func (p *Playlist) Add(track Track) {
 	p.tracks = append(p.tracks, track)
 	if p.current == -1 {
@@ -116,7 +127,9 @@ func (p *Playlist) Add(track Track) {
 	}
 }
 
-// Remove elimina una pista de la lista de reproducción por índice.
+// Remove elimina la pista ubicada en el índice especificado garantizando la consistencia interna.
+// Ajusta de forma segura el cursor actual y actualiza la permutación del modo aleatorio
+// para sincronizar los índices restantes tras la eliminación.
 func (p *Playlist) Remove(index int) {
 	if !p.isValidIndex(index) {
 		return
@@ -137,7 +150,8 @@ func (p *Playlist) Remove(index int) {
 	}
 }
 
-// Clear vacía la lista de reproducción.
+// Clear vacía por completo la lista de reproducción y reinicia los cursores
+// y las estructuras de seguimiento del modo aleatorio a su estado predeterminado.
 func (p *Playlist) Clear() {
 	p.tracks = make([]Track, 0)
 	p.current = -1
@@ -146,7 +160,8 @@ func (p *Playlist) Clear() {
 	p.shuffleStartIdx = 0
 }
 
-// Current devuelve la pista actualmente seleccionada en la lista de reproducción.
+// Current devuelve la pista actualmente seleccionada en el cursor de reproducción.
+// Retorna una estructura Track vacía y false si el cursor no apunta a un elemento válido.
 func (p *Playlist) Current() (Track, bool) {
 	if !p.isValidIndex(p.current) {
 		return Track{}, false
@@ -154,14 +169,18 @@ func (p *Playlist) Current() (Track, bool) {
 	return p.tracks[p.current], true
 }
 
-// Next determina y devuelve la siguiente pista basada en el modo actual.
+// Next calcula y avanza a la siguiente pista de acuerdo con las reglas del modo de repetición
+// y el estado del modo aleatorio. Devuelve la pista seleccionada y true, o una pista vacía
+// y false si se alcanzó el final de la lista de reproducción sin repetición activa.
 func (p *Playlist) Next() (Track, bool) {
 	if len(p.tracks) == 0 {
 		return Track{}, false
 	}
+	// Modo de repetición unitaria: mantiene la misma pista indefinidamente
 	if p.repeat == RepeatOne && p.isValidIndex(p.current) {
 		return p.tracks[p.current], true
 	}
+	// Modo de reproducción aleatoria (Shuffle)
 	if p.shuffle {
 		if len(p.shuffleOrder) == 0 {
 			p.regenerateShuffle()
@@ -170,6 +189,7 @@ func (p *Playlist) Next() (Track, bool) {
 			}
 		}
 		nextIdx := (p.shuffleIdx + 1) % len(p.shuffleOrder)
+		// Si se completó un ciclo completo de barajado y la repetición está inactiva, detener reproducción
 		if p.repeat == RepeatOff && nextIdx == p.shuffleStartIdx {
 			return Track{}, false
 		}
@@ -177,10 +197,12 @@ func (p *Playlist) Next() (Track, bool) {
 		p.current = p.shuffleOrder[p.shuffleIdx]
 		return p.tracks[p.current], true
 	}
+	// Modo de repetición completa: avanza de forma cíclica volviendo al primer elemento
 	if p.repeat == RepeatAll {
 		p.current = (p.current + 1) % len(p.tracks)
 		return p.tracks[p.current], true
 	}
+	// Navegación secuencial estándar: detiene el avance si ya se alcanzó la última pista
 	if p.isLastSequential() {
 		return Track{}, false
 	}
@@ -188,11 +210,14 @@ func (p *Playlist) Next() (Track, bool) {
 	return p.tracks[p.current], true
 }
 
-// Previous determina y devuelve la pista anterior basada en el modo actual.
+// Previous determina y retrocede a la pista previa en la secuencia según el modo activo
+// (lineal o aleatorio). Devuelve la pista resultante y true, o una pista vacía y false
+// si la lista está vacía o ya se encuentra al inicio de la secuencia.
 func (p *Playlist) Previous() (Track, bool) {
 	if len(p.tracks) == 0 || p.current < 0 {
 		return Track{}, false
 	}
+	// Retroceso en orden aleatorio
 	if p.shuffle {
 		if len(p.shuffleOrder) == 0 {
 			return Track{}, false
@@ -204,6 +229,7 @@ func (p *Playlist) Previous() (Track, bool) {
 		p.current = p.shuffleOrder[p.shuffleIdx]
 		return p.tracks[p.current], true
 	}
+	// Retroceso en orden secuencial
 	if p.current <= 0 {
 		return Track{}, false
 	}
@@ -211,7 +237,9 @@ func (p *Playlist) Previous() (Track, bool) {
 	return p.tracks[p.current], true
 }
 
-// JumpTo cambia la pista actual a la especificada por índice.
+// JumpTo desplaza inmediatamente el cursor de reproducción al índice especificado.
+// Si el modo aleatorio está activo, localiza y sincroniza la posición dentro de shuffleOrder.
+// Retorna true si el índice es válido y el salto se realizó con éxito; false en caso contrario.
 func (p *Playlist) JumpTo(index int) bool {
 	if !p.isValidIndex(index) {
 		return false
@@ -224,7 +252,9 @@ func (p *Playlist) JumpTo(index int) bool {
 	return true
 }
 
-// ToggleShuffle activa o desactiva el modo aleatorio.
+// ToggleShuffle alterna el estado del modo de reproducción aleatoria.
+// Si se activa, calcula una nueva permutación mediante el algoritmo Fisher-Yates.
+// Si se desactiva, libera la memoria de la permutación y restablece los cursores aleatorios.
 func (p *Playlist) ToggleShuffle() {
 	p.shuffle = !p.shuffle
 	if p.shuffle && len(p.tracks) > 0 {
@@ -236,13 +266,14 @@ func (p *Playlist) ToggleShuffle() {
 	}
 }
 
-// Length devuelve el número total de pistas en la lista.
+// Length devuelve el número total de pistas almacenadas en la lista de reproducción.
 func (p *Playlist) Length() int { return len(p.tracks) }
 
-// IsEmpty verifica si la lista de reproducción está vacía.
+// IsEmpty verifica si la lista de reproducción carece de pistas registradas.
 func (p *Playlist) IsEmpty() bool { return len(p.tracks) == 0 }
 
-// isLast comprueba si la pista actual es la última, según el modo de repetición.
+// isLast determina si la pista actual representa el último elemento de la secuencia de reproducción,
+// evaluando las condiciones del modo de repetición y distinguiendo entre el orden lineal y aleatorio.
 func (p *Playlist) isLast() bool {
 	if p.repeat != RepeatOff {
 		return false
@@ -256,17 +287,19 @@ func (p *Playlist) isLast() bool {
 	return p.isLastSequential()
 }
 
-// isLastSequential comprueba si la pista actual es la última en orden secuencial.
+// isLastSequential comprueba si el cursor se sitúa en la última posición física del arreglo de pistas.
 func (p *Playlist) isLastSequential() bool {
 	return p.current >= len(p.tracks)-1
 }
 
-// isValidIndex comprueba si el índice dado está dentro de los límites de la lista.
+// isValidIndex valida si el índice proporcionado se encuentra dentro del rango admisible [0, len(tracks)-1].
 func (p *Playlist) isValidIndex(index int) bool {
 	return index >= 0 && index < len(p.tracks)
 }
 
-// regenerateShuffle regenera el orden aleatorio de las pistas.
+// regenerateShuffle construye una permutación pseudoaleatoria completa de los índices de pistas
+// implementando el algoritmo de barajado Fisher-Yates (Knuth shuffle) y preserva la sincronización
+// del cursor aleatorio con la pista actualmente seleccionada.
 func (p *Playlist) regenerateShuffle() {
 	n := len(p.tracks)
 	if n == 0 {
@@ -276,6 +309,7 @@ func (p *Playlist) regenerateShuffle() {
 	for i := range n {
 		p.shuffleOrder[i] = i
 	}
+	// Aplicación del algoritmo Fisher-Yates en orden descendente O(n)
 	for i := n - 1; i > 0; i-- {
 		j := rand.Intn(i + 1)
 		p.shuffleOrder[i], p.shuffleOrder[j] = p.shuffleOrder[j], p.shuffleOrder[i]
@@ -284,22 +318,25 @@ func (p *Playlist) regenerateShuffle() {
 	p.shuffleStartIdx = p.shuffleIdx
 }
 
-// rebuildShuffleAfterRemove actualiza el orden aleatorio tras eliminar una pista.
+// rebuildShuffleAfterRemove reconstruye el arreglo de permutación aleatoria tras la eliminación
+// de una pista, descartando el índice suprimido y decrementando los índices mayores a este
+// para mantener la correspondencia con las posiciones reales del arreglo tracks.
 func (p *Playlist) rebuildShuffleAfterRemove(removedIndex int) {
 	newOrder := make([]int, 0, len(p.shuffleOrder)-1)
 	for _, idx := range p.shuffleOrder {
 		if idx == removedIndex {
-			continue
+			continue // Excluir el elemento suprimido de la permutación
 		}
 		if idx > removedIndex {
-			idx--
+			idx-- // Desplazar hacia abajo los índices superiores para reflejar el corte del slice
 		}
 		newOrder = append(newOrder, idx)
 	}
 	p.shuffleOrder = newOrder
 }
 
-// findInShuffleOrder busca el índice de la pista en el orden aleatorio.
+// findInShuffleOrder localiza la posición ordinal que ocupa un determinado índice de pista
+// dentro de la secuencia permutada shuffleOrder. Devuelve 0 si no se encuentra coincidencia.
 func (p *Playlist) findInShuffleOrder(trackIndex int) int {
 	for i, idx := range p.shuffleOrder {
 		if idx == trackIndex {
