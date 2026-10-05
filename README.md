@@ -23,6 +23,7 @@ GoPlayer brings a modern, sleek audio playback experience directly to your termi
   - Ability to remove individual tracks from the active session.
 - **Metadata Extraction**: Automatically extracts **Title**, **Artist**, and **Album** metadata from audio tags.
 - **Quick Filter**: Press `Ctrl+F` to open an inline fuzzy/substring search bar that filters the playlist by Title or Artist in real time. Navigate matches with ↑/↓ or j/k, press `Enter` to play the highlighted track, and `Esc` to clear/close the filter.
+- **5-Band Equalizer**: Parametric biquad EQ (60Hz, 250Hz, 1kHz, 4kHz, 10kHz, ±12 dB per band) with bypass toggle and persistent settings. Press `e` to adjust.
 - **Playback Modes**:
   - **Shuffle**: Randomized playlist order.
   - **Repeat Modes**: Repeat Off, Repeat One (single track), or Repeat All (entire playlist).
@@ -164,6 +165,16 @@ go run ./cmd/goplayer -dir /path/to/your/music
 | `-` | Decrease volume |
 | `m` | Toggle Mute |
 | `s` | Toggle Shuffle mode |
+| `e` | Open/close Equalizer panel |
+
+#### Equalizer Panel (when `e` is active)
+| Key | Action |
+| :--- | :--- |
+| `←` / `→` (or `h`/`l`) | Select band |
+| `↑` / `↓` (or `k`/`j`) | Adjust band gain ±1 dB |
+| `0` | Reset selected band |
+| `x` | Toggle EQ on/off (bypass) |
+| `Esc` / `e` | Close panel and save settings |
 | `r` | Cycle Repeat mode (Off → One → All) |
 
 ### Directory Browser (Active Mode)

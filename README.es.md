@@ -23,6 +23,7 @@ GoPlayer ofrece una experiencia de reproducción de audio moderna y elegante dir
   - Capacidad de eliminar pistas individuales de la sesión activa.
 - **Extracción de Metadatos**: Extrae automáticamente metadatos de **Título**, **Artista** y **Álbum** de las etiquetas de audio.
 - **Filtro Rápido (Quick Filter)**: Presiona `Ctrl+F` para abrir una barra de búsqueda en línea (fuzzy/substring) que filtra la lista por Título o Artista en tiempo real. Navega coincidencias con ↑/↓ o j/k, presiona `Enter` para reproducir la pista seleccionada y `Esc` para cerrar/limpiar el filtro.
+- **Ecualizador de 5 Bandas**: EQ paramétrico con biquads (60Hz, 250Hz, 1kHz, 4kHz, 10kHz, ±12 dB por banda), bypass y ajustes persistentes. Presiona `e` para ajustarlo.
 - **Modos de Reproducción**:
   - **Aleatorio (Shuffle)**: Orden de lista de reproducción aleatorio.
   - **Modos de Repetición**: Repetición desactivada, Repetir una (pista única) o Repetir todo (lista completa).
@@ -164,6 +165,16 @@ go run ./cmd/goplayer -dir /ruta/a/tu/musica
 | `-` | Bajar volumen |
 | `m` | Alternar Mute |
 | `s` | Alternar modo Aleatorio |
+| `e` | Abrir/cerrar panel del Ecualizador |
+
+#### Panel del Ecualizador (con `e` activo)
+| Tecla | Acción |
+| :--- | :--- |
+| `←` / `→` (o `h`/`l`) | Seleccionar banda |
+| `↑` / `↓` (o `k`/`j`) | Ajustar ganancia ±1 dB |
+| `0` | Resetear banda seleccionada |
+| `x` | Activar/desactivar EQ (bypass) |
+| `Esc` / `e` | Cerrar panel y guardar ajustes |
 | `r` | Ciclar modo de Repetición (Desactivado → Una → Todo) |
 
 ### Explorador de Directorios (Modo Activo)
