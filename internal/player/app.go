@@ -71,6 +71,10 @@ type AppModel struct {
 	filteredIndices []int           // Índices de playlist.tracks que coinciden con la búsqueda
 	filterCursor    int             // Posición del cursor dentro de filteredIndices
 
+	// Ecualizador
+	eqActive bool // Indica si el panel de ajuste del ecualizador tiene el foco
+	eqCursor int  // Banda del ecualizador seleccionada actualmente
+
 	// Lista de sugerencias destacadas para la búsqueda rápida
 	suggestionLimit   int   // Límite máximo de sugerencias simultáneas a mostrar
 	suggestionIndices []int // Índices de las mejores sugerencias calculadas
@@ -269,6 +273,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.isFiltering {
 			return m.handleFilterInput(msg)
+		}
+		if m.eqActive {
+			return m.handleEQInput(msg)
 		}
 		return m.handleKeyInput(msg)
 
@@ -608,6 +615,9 @@ func (m AppModel) renderSuggestions() string {
 func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
+		if m.Audio.HasEQ() {
+			_ = SaveEQ(m.Audio.EQEnabled(), m.Audio.GetEQBands())
+		}
 		m.Audio.Close()
 		return m, tea.Quit
 	case "o", "ctrl+o":
@@ -655,6 +665,36 @@ func (m AppModel) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filteredIndices = nil
 		m.filterCursor = 0
 		return m, nil
+	case "e":
+		// Abrir/cerrar el panel del ecualizador
+		m.eqActive = !m.eqActive
+	}
+	return m, nil
+}
+
+// handleEQInput procesa las teclas mientras el panel del ecualizador tiene el foco:
+// izquierda/derecha eligen banda, arriba/abajo ajustan dB, 0 resetea la banda,
+// x activa/desactiva el EQ y Esc cierra el panel.
+func (m AppModel) handleEQInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	bands := m.Audio.GetEQBands()
+	switch msg.String() {
+	case "esc", "e":
+		m.eqActive = false
+		if m.Audio.HasEQ() {
+			_ = SaveEQ(m.Audio.EQEnabled(), bands)
+		}
+	case "left", "h":
+		m.eqCursor = max(0, m.eqCursor-1)
+	case "right", "l":
+		m.eqCursor = min(eqBandCount-1, m.eqCursor+1)
+	case "up", "k":
+		m.Audio.SetEQBand(m.eqCursor, bands[m.eqCursor]+eqGainStep)
+	case "down", "j":
+		m.Audio.SetEQBand(m.eqCursor, bands[m.eqCursor]-eqGainStep)
+	case "0":
+		m.Audio.SetEQBand(m.eqCursor, 0)
+	case "x":
+		m.Audio.ToggleEQ()
 	}
 	return m, nil
 }
@@ -812,6 +852,9 @@ func (m AppModel) View() string {
 	if m.isPickingFolder {
 		sections = append(sections, m.renderBrowserPanel())
 	} else {
+		if m.eqActive {
+			sections = append(sections, m.renderEQPanel())
+		}
 		if m.showQueue {
 			if m.isFiltering {
 				sections = append(sections, m.renderFilterBar())
@@ -906,6 +949,46 @@ func (m AppModel) renderMetadataLine() string {
 	return lipgloss.NewStyle().Foreground(comment).MarginLeft(2).Render(
 		fmt.Sprintf("%s  |  %s %s  |%s| %s ", volBar, iconQueue, queueDisplay, shuffleIcon, m.playlist.repeat.Icon()),
 	)
+}
+
+// renderEQPanel dibuja el panel del ecualizador con una columna por banda,
+// barras proporcionales a la ganancia en dB y la banda activa resaltada.
+func (m AppModel) renderEQPanel() string {
+	bands := m.Audio.GetEQBands()
+	labels := []string{" 60Hz", "250Hz", "  1kHz", "  4kHz", " 10kHz"}
+	levels := []string{"▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
+
+	var b strings.Builder
+	status := lipgloss.NewStyle().Foreground(green).Render("ON")
+	if !m.Audio.EQEnabled() {
+		status = lipgloss.NewStyle().Foreground(red).Render("OFF (bypass)")
+	}
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(orange).Render("  Ecualizador ") + status + "\n\n")
+
+	for i := 0; i < eqBandCount; i++ {
+		g := bands[i]
+		filled := int((g - eqGainMin) / (eqGainMax - eqGainMin) * float64(len(levels)-1))
+		label := labels[i]
+		style := lipgloss.NewStyle().Foreground(foreground)
+		barStyle := lipgloss.NewStyle().Foreground(cyan)
+		if i == m.eqCursor {
+			label = ">" + label[1:]
+			style = lipgloss.NewStyle().Bold(true).Foreground(pink)
+			barStyle = lipgloss.NewStyle().Foreground(pink)
+		}
+		bar := ""
+		for j := 0; j < len(levels); j++ {
+			if j <= filled {
+				bar += levels[j]
+			} else {
+				bar += " "
+			}
+		}
+		b.WriteString(style.Render(label) + " " + barStyle.Render(bar) + style.Render(fmt.Sprintf(" %+5.0f dB\n", g)))
+	}
+	b.WriteString(lipgloss.NewStyle().Foreground(comment).Render("\n←/→ banda | ↑/↓ ±1dB | 0 reset | x on/off | Esc cerrar"))
+
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(purple).Padding(0, 2).MarginLeft(2).Render(b.String())
 }
 
 // renderPlaylistPanel devuelve una representación en lista de la cola de canciones.
@@ -1028,7 +1111,7 @@ func (m AppModel) renderHelpPanel() string {
 	categories := []category{
 		{iconPlay + " Reproducción", []binding{{"espacio", "Play / Pausa"}, {"n / N", "Sig / Anterior"}, {"> / <", "Adel. / Atrasar"}, {"0", "Reiniciar"}}},
 		{iconNav + " Navegación", []binding{{"↑↓ / jk", "Mover cursor"}, {"enter", "Reproducir"}, {"d", "Eliminar de cola"}, {"l", "Ocultar cola"}, {"o", "Explorar carpetas"}, {"ctrl+f", "Buscar / Filtrar"}}},
-		{iconAudio + " Audio & Modos", []binding{{"+ / -", "Volumen"}, {"m", "Silenciar"}, {"r", "Repetir"}, {"s", "Aleatorio"}}},
+		{iconAudio + " Audio & Modos", []binding{{"+ / -", "Volumen"}, {"m", "Silenciar"}, {"r", "Repetir"}, {"s", "Aleatorio"}, {"e", "Ecualizador"}}},
 		{iconSystem + " Sistema", []binding{{"h / ?", "Ocultar ayuda"}, {"q", "Salir"}}},
 	}
 

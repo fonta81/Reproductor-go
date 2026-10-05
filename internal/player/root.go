@@ -187,6 +187,9 @@ func (r RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case menu.ActionQuit:
 			// Liberar recursos y finalizar el programa
+			if r.playerModel.Audio.HasEQ() {
+				_ = SaveEQ(r.playerModel.Audio.EQEnabled(), r.playerModel.Audio.GetEQBands())
+			}
 			r.playerModel.Audio.Close()
 			return r, tea.Quit
 		}
@@ -194,6 +197,9 @@ func (r RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// Interrupción forzada global mediante Ctrl+C disponible en cualquier pantalla
 		if msg.String() == "ctrl+c" {
+			if r.playerModel.Audio.HasEQ() {
+				_ = SaveEQ(r.playerModel.Audio.EQEnabled(), r.playerModel.Audio.GetEQBands())
+			}
 			r.playerModel.Audio.Close()
 			return r, tea.Quit
 		}
@@ -216,7 +222,7 @@ func (r RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			// En la vista del reproductor: si se presiona Esc fuera de los modos modales
 			// (búsqueda o explorador de carpetas), retornar a la pantalla del menú
-			if msg.String() == "esc" && !r.playerModel.isFiltering && !r.playerModel.isPickingFolder {
+			if msg.String() == "esc" && !r.playerModel.isFiltering && !r.playerModel.isPickingFolder && !r.playerModel.eqActive {
 				r.currentScreen = ScreenMenu
 				r.syncMenuState()
 				return r, nil

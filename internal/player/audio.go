@@ -57,6 +57,7 @@ type AudioEngine struct {
 	streamer   beep.StreamSeekCloser // Decodificador activo del archivo de audio con capacidad de seek y cierre
 	ctrl       *beep.Ctrl            // Controlador para pausar y reanudar el flujo de datos
 	volume     *effects.Volume       // Efecto de ganancia para control de volumen logarítmico
+	eq         *Equalizer            // Ecualizador paramétrico de 5 bandas
 	format     beep.Format           // Formato original del archivo (frecuencia de muestreo y precisión)
 	isInit     bool                  // Bandera para asegurar inicialización única del altavoz
 	sessionID  int                   // Identificador de la sesión de reproducción actual (invalida eventos de pistas pasadas)
@@ -122,8 +123,19 @@ func (ae *AudioEngine) Load(track Track) (time.Duration, error) {
 	resampled := beep.Resample(4, format.SampleRate, standardSampleRate, streamer)
 
 	ae.ctrl = &beep.Ctrl{Streamer: resampled}
+	ae.eq = NewEqualizer(ae.ctrl, standardSampleRate)
+
+	// Restaurar los ajustes de EQ guardados en la configuración de usuario,
+	// si existen, para conservarlos entre sesiones.
+	if enabled, gains, err := LoadEQ(); err == nil {
+		ae.eq.Enabled = enabled
+		for i := range gains {
+			ae.eq.SetGain(i, gains[i])
+		}
+	}
+
 	ae.volume = &effects.Volume{
-		Streamer: ae.ctrl,
+		Streamer: ae.eq,
 		Base:     math.Pow(10, 1.0/20.0), // Base para atenuación/ganancia logarítmica en decibelios (dB)
 		Volume:   0,
 		Silent:   false,
@@ -160,6 +172,7 @@ func (ae *AudioEngine) Stop() {
 	speaker.Lock()
 	ae.ctrl = nil
 	ae.volume = nil
+	ae.eq = nil
 	speaker.Unlock()
 }
 
@@ -201,6 +214,51 @@ func (ae *AudioEngine) ToggleMute() {
 		return
 	}
 	ae.volume.Silent = !ae.volume.Silent
+}
+
+// SetEQBand ajusta la ganancia (dB) de una banda del ecualizador de forma segura.
+func (ae *AudioEngine) SetEQBand(band int, gainDB float64) {
+	speaker.Lock()
+	defer speaker.Unlock()
+	if ae.eq == nil {
+		return
+	}
+	ae.eq.SetGain(band, gainDB)
+}
+
+// GetEQBands devuelve una copia de las ganancias actuales por banda en dB.
+func (ae *AudioEngine) GetEQBands() [eqBandCount]float64 {
+	speaker.Lock()
+	defer speaker.Unlock()
+	if ae.eq == nil {
+		return [eqBandCount]float64{}
+	}
+	return ae.eq.Gains
+}
+
+// ToggleEQ activa o desactiva el ecualizador (bypass) y devuelve el nuevo estado.
+func (ae *AudioEngine) ToggleEQ() bool {
+	speaker.Lock()
+	defer speaker.Unlock()
+	if ae.eq == nil {
+		return false
+	}
+	ae.eq.Enabled = !ae.eq.Enabled
+	return ae.eq.Enabled
+}
+
+// HasEQ indica si hay un stream activo con ecualizador inicializado.
+func (ae *AudioEngine) HasEQ() bool {
+	speaker.Lock()
+	defer speaker.Unlock()
+	return ae.eq != nil
+}
+
+// EQEnabled indica si el ecualizador está activo.
+func (ae *AudioEngine) EQEnabled() bool {
+	speaker.Lock()
+	defer speaker.Unlock()
+	return ae.eq != nil && ae.eq.Enabled
 }
 
 // IsMuted indica si el audio está actualmente silenciado de forma segura.
